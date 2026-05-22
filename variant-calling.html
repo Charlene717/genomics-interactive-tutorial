@@ -1,0 +1,305 @@
+<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Step 5: Variant Calling — Genomics Tutorial</title>
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+</head><body>
+<nav class="top-nav"><div class="top-nav-inner">
+  <a href="index.html" class="top-nav-brand"><span>🧬</span> <span data-zh="基因體學教學" data-en="Genomics Tutorial">基因體學教學</span></a>
+  <ul class="top-nav-links"><li><a href="sequencing.html">Seq</a></li><li><a href="qc.html">QC</a></li><li><a href="alignment.html">Align</a></li><li><a href="postalign.html">PostAlign</a></li><li><a href="variant-calling.html" class="active">VarCall</a></li><li><a href="annotation.html">Annot</a></li><li><a href="sv-cnv.html">SV/CNV</a></li><li><a href="rnaseq.html">RNA-seq</a></li><li><a href="chip-atac.html">ChIP/ATAC</a></li><li><a href="methylation.html">Methyl</a></li><li><a href="gwas.html">GWAS</a></li><li><a href="popgen.html">PopGen</a></li><li><a href="enrichment.html">Enrich</a></li><li><a href="workflow.html">Pipeline</a></li>
+    <li><a href="references/index.html" data-zh="📚 參考資料" data-en="📚 References">📚 參考資料</a></li>
+  </ul>
+</div></nav>
+<div class="progress-bar-container"><div class="progress-bar" id="progressBar"></div></div>
+<header class="page-hero"><div class="step-badge">STEP 5 / 14</div>
+<h1 data-zh="變異呼叫 (SNV / Indel)" data-en="Variant Calling (SNV / Indel)">變異呼叫 (SNV / Indel)</h1>
+<p class="subtitle" data-lang="zh">從 BAM 到 VCF——GATK HaplotypeCaller、DeepVariant 與 joint genotyping 的核心邏輯。</p>
+<p class="subtitle" data-lang="en">From BAM to VCF — the core logic of GATK HaplotypeCaller, DeepVariant, and joint genotyping.</p>
+</header>
+<main class="content-wrap">
+
+<section class="section">
+<div class="section-label" data-zh="概覽" data-en="OVERVIEW">概覽</div>
+<h2 data-zh="變異呼叫到底在做什麼？" data-en="What does variant calling actually do?">變異呼叫到底在做什麼？</h2>
+<div data-lang="zh">
+<p>從 BAM 出發，<strong>variant caller</strong> 對每個基因組位置回答兩個問題：(1) <strong>這個位置與參考序列不同嗎？</strong>(2) <strong>樣本的基因型是 0/0、0/1 還是 1/1？</strong> 答案以 <strong>VCF</strong> 格式輸出，每行一個位點（site），含位置、ref、alt、品質、過濾、樣本基因型。</p>
+<p>背後並非簡單比對：caller 必須區分「真實變異」與「測序錯誤、比對假象、PCR error」。現代主流方法分兩大流派——<strong>基於 HMM/概率模型</strong>（GATK HaplotypeCaller、bcftools）與<strong>基於深度學習</strong>（DeepVariant、Clair3）。</p>
+</div>
+<div data-lang="en">
+<p>Starting from BAM, a <strong>variant caller</strong> answers two questions per genome position: (1) <strong>Does this site differ from the reference?</strong> (2) <strong>Is the sample 0/0, 0/1, or 1/1?</strong> Output is <strong>VCF</strong> — one site per line, with position, ref, alt, quality, filter, and per-sample genotypes.</p>
+<p>It's not simple alignment counting: callers must separate "real variants" from "sequencing errors, mapping artifacts, PCR errors". Two modern schools — <strong>HMM/probabilistic</strong> (GATK HaplotypeCaller, bcftools) and <strong>deep learning</strong> (DeepVariant, Clair3).</p>
+</div>
+<div class="callout tip"><span class="callout-icon">💡</span><div>
+<span data-lang="zh"><strong>核心原則：</strong>SNV 與 short Indel 一起呼叫；structural variants &amp; CNV 用<strong>不同工具</strong>（見 Step 7）。Joint genotyping（多樣本一起呼叫）比單樣本 calling 在 rare variant 與 sensitivity 上明顯更好。</span>
+<span data-lang="en"><strong>Core principle:</strong> SNVs and short indels are called together; SVs and CNVs require <strong>different tools</strong> (see Step 7). Joint genotyping (calling all samples together) significantly outperforms single-sample calling for rare variants and sensitivity.</span>
+</div></div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="主流方法" data-en="METHODS">主流方法</div>
+<h2 data-zh="一、主流 SNV/Indel Callers" data-en="I. Mainstream SNV/Indel Callers">一、主流 SNV/Indel Callers</h2>
+
+<div class="card-grid cols-2">
+<div class="card"><div class="card-icon">🧠</div><h4>GATK HaplotypeCaller</h4>
+<div data-lang="zh"><p>Broad Institute 的 best practice 標準（v4.6.0.0）。<strong>邏輯：</strong>在 "ActiveRegion" 內局部重新組裝 reads，產生候選 haplotypes，再用 PairHMM 計算每條 haplotype 的可能性，最終 genotype。<strong>強項：</strong>Indel 處理穩健、GVCF + joint genotyping 適合大型隊列。<strong>新發展：</strong>Broad x Illumina 已將 DRAGEN 演算法整合進 GATK 4。</p></div>
+<div data-lang="en"><p>Broad Institute's best-practice standard (v4.6.0.0). <strong>Logic:</strong> within "ActiveRegions", locally reassemble reads into candidate haplotypes, compute haplotype likelihoods via PairHMM, then genotype. <strong>Strengths:</strong> robust indel handling; GVCF + joint genotyping scales to large cohorts. <strong>2025:</strong> Broad×Illumina integrated DRAGEN algorithms into GATK 4.</p></div>
+</div>
+<div class="card"><div class="card-icon">🤖</div><h4>DeepVariant</h4>
+<div data-lang="zh"><p>Google 開發的 CNN-based caller（v1.8.0, 2025）。<strong>邏輯：</strong>把 BAM pileup 轉成圖片，用影像分類網路判斷變異。<strong>強項：</strong>Indel 與低品質區域準確度領先 GATK；trio Mendelian error rate ~3% vs GATK ~5%；無需 BQSR。<strong>弱項：</strong>joint genotyping 工具鏈仍以 GLnexus 為主，比 GATK 整合性低。</p></div>
+<div data-lang="en"><p>Google's CNN-based caller (v1.8.0, 2025). <strong>Logic:</strong> convert BAM pileup to images, classify with image-CNN. <strong>Strengths:</strong> leads GATK on indels and difficult regions; trio Mendelian error ~3% vs GATK ~5%; no BQSR needed. <strong>Weakness:</strong> joint-genotyping tooling (GLnexus) is less integrated than GATK.</p></div>
+</div>
+<div class="card"><div class="card-icon">⚡</div><h4>bcftools mpileup + call</h4>
+<div data-lang="zh"><p>輕量、快速的傳統選擇。<strong>邏輯：</strong>逐位置 pileup 計算 allele likelihood + Bayesian genotype。<strong>強項：</strong>速度、低資源、可 stream；非常適合教學與快速 prototype。<strong>弱項：</strong>Indel 與複雜區域準確度不如 GATK/DeepVariant；對 cohort 規模不擴展。</p></div>
+<div data-lang="en"><p>Lightweight, fast traditional choice. <strong>Logic:</strong> per-position pileup with allele likelihood + Bayesian genotyping. <strong>Strengths:</strong> speed, low resource, streamable; great for teaching and quick prototyping. <strong>Weakness:</strong> less accurate on indels and complex regions; doesn't scale to cohorts.</p></div>
+</div>
+<div class="card"><div class="card-icon">🌊</div><h4>Clair3 / Clair3-RNA (long reads)</h4>
+<div data-lang="zh"><p>ONT/PacBio 長讀長首選（2025 最新 v1.0.11）。<strong>結合</strong> pileup 與 full-alignment 兩個 NN 模型；2025-03 加入 sequence head/tail calling 與 haplotype-aware workflow。Clair3-RNA 處理長讀長 RNA-seq。對 ONT 而言，Clair3 + DeepVariant 是 PrecisionFDA Truth Challenge 主流選擇。</p></div>
+<div data-lang="en"><p>Top choice for ONT/PacBio long reads (v1.0.11, 2025). <strong>Combines</strong> pileup and full-alignment neural networks; 2025-03 added sequence head/tail calling and haplotype-aware workflow. Clair3-RNA handles long-read RNA-seq. For ONT, Clair3 + DeepVariant dominate PrecisionFDA Truth Challenge.</p></div>
+</div>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="互動模擬" data-en="INTERACTIVE">互動模擬</div>
+<h2 data-zh="二、Allele Frequency vs Genotype Likelihood" data-en="II. Allele Frequency ↔ Genotype Likelihood">二、Allele Frequency vs Genotype Likelihood</h2>
+<div data-lang="zh"><p>給定該位置 <strong>n</strong> 條 reads，其中 <strong>k</strong> 條支持 alt allele。在 binomial model 下，三種基因型 (0/0、0/1、1/1) 的 likelihood 為：<br>P(data | 0/0) ∝ (1-ε)^(n-k) · ε^k &nbsp;|&nbsp; P(data | 0/1) ∝ 0.5^n &nbsp;|&nbsp; P(data | 1/1) ∝ (1-ε)^k · ε^(n-k)</p><p>其中 ε 為定序錯誤率。拖動下方 alt 比例觀察 caller 如何決定。</p></div>
+<div data-lang="en"><p>Given <strong>n</strong> reads at the site, <strong>k</strong> of which support the alt allele, the binomial-model likelihoods for the three genotypes are:<br>P(data | 0/0) ∝ (1-ε)^(n-k) · ε^k &nbsp;|&nbsp; P(data | 0/1) ∝ 0.5^n &nbsp;|&nbsp; P(data | 1/1) ∝ (1-ε)^k · ε^(n-k)</p><p>where ε is sequencing error rate. Drag the sliders to see how a caller decides.</p></div>
+
+<div class="interactive-panel">
+<div class="sim-stats">
+  <span class="sim-stat pass" id="gtCall">—</span>
+  <span class="sim-stat pass" id="gtQ">—</span>
+</div>
+<div class="slider-group"><label><span data-zh="總覆蓋 (n reads)" data-en="Total depth (n reads)">總覆蓋</span> <span id="valN">30</span></label><input type="range" id="sliderN" min="3" max="100" value="30" step="1"></div>
+<div class="slider-group"><label><span data-zh="支持 alt 的 reads (k)" data-en="Alt-supporting reads (k)">Alt reads</span> <span id="valK">15</span></label><input type="range" id="sliderK" min="0" max="100" value="15" step="1"></div>
+<div class="slider-group"><label><span data-zh="定序錯誤率 ε" data-en="Sequencing error rate ε">錯誤率</span> <span id="valE">0.01</span></label><input type="range" id="sliderE" min="0.001" max="0.05" value="0.01" step="0.001"></div>
+<div class="chart-container"><canvas id="gtChart"></canvas></div>
+<p style="font-size:.82rem;color:var(--c-ink-muted);text-align:center;" data-lang="zh">三種基因型在 log-likelihood 下的相對機率</p>
+<p style="font-size:.82rem;color:var(--c-ink-muted);text-align:center;" data-lang="en">Relative log-likelihoods for the three genotypes</p>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="VCF 格式" data-en="VCF FORMAT">VCF 格式</div>
+<h2 data-zh="三、VCF 必懂欄位" data-en="III. Essential VCF Fields">三、VCF 必懂欄位</h2>
+<div class="code-tabs"><div class="code-tab-btns"><button class="code-tab-btn active" onclick="switchTab(this,'vcf1')">VCF Example</button></div>
+<div class="code-tab-content active" id="vcf1"><pre><span class="comment">##fileformat=VCFv4.3</span>
+<span class="comment">##INFO=&lt;ID=DP,Number=1,Type=Integer,Description="Total read depth"&gt;</span>
+<span class="comment">##INFO=&lt;ID=AF,Number=A,Type=Float,Description="Allele frequency"&gt;</span>
+<span class="comment">##FORMAT=&lt;ID=GT,Number=1,Type=String,Description="Genotype"&gt;</span>
+<span class="comment">##FORMAT=&lt;ID=AD,Number=R,Type=Integer,Description="Allelic depths (ref,alt)"&gt;</span>
+<span class="comment">##FORMAT=&lt;ID=GQ,Number=1,Type=Integer,Description="Genotype Quality"&gt;</span>
+<span class="kw">#CHROM  POS    ID         REF  ALT  QUAL   FILTER  INFO              FORMAT       SAMPLE1</span>
+chr1    14653  rs375086259  A    G    <span class="num">2856</span>   PASS    DP=<span class="num">82</span>;AF=<span class="num">0.5</span>      GT:AD:GQ      <span class="str">0/1:42,40:99</span>
+chr1    14907  .           A   AG    <span class="num">450</span>    LowQual DP=<span class="num">15</span>;AF=<span class="num">0.33</span>     GT:AD:GQ      <span class="str">0/1:10,5:35</span>
+chr1    15211  rs78601809   T    G    <span class="num">5210</span>   PASS    DP=<span class="num">95</span>;AF=<span class="num">1.0</span>      GT:AD:GQ      <span class="str">1/1:0,95:99</span></pre></div>
+</div>
+
+<div class="card-grid cols-2">
+<div class="card"><h4>必看 INFO 欄位</h4>
+<div data-lang="zh"><p><strong>DP</strong>: 該位點總覆蓋深度 — 太低 &lt;10× 不可信，太高 &gt;3× mean 可能比對假象<br><strong>AF</strong>: alt allele frequency<br><strong>MQ</strong>: 平均 mapping quality — &lt; 40 警告<br><strong>QD</strong>: QUAL / DP — &lt; 2 過濾<br><strong>FS</strong>: Strand bias Fisher score — &gt; 60 (SNV) / &gt; 200 (Indel) 過濾</p></div>
+<div data-lang="en"><p><strong>DP</strong>: total site depth — &lt; 10× untrustworthy, &gt; 3× mean suspect<br><strong>AF</strong>: alt allele frequency<br><strong>MQ</strong>: mean mapping quality — flag if &lt; 40<br><strong>QD</strong>: QUAL / DP — filter &lt; 2<br><strong>FS</strong>: strand-bias Fisher score — filter &gt; 60 (SNV) / &gt; 200 (Indel)</p></div>
+</div>
+<div class="card"><h4>必看 FORMAT 欄位</h4>
+<div data-lang="zh"><p><strong>GT</strong>: 基因型 (0/0 hom-ref, 0/1 het, 1/1 hom-alt, ./. missing)<br><strong>AD</strong>: per-allele 深度 (ref,alt)<br><strong>DP</strong>: 該樣本該位點深度<br><strong>GQ</strong>: genotype quality (Phred-scaled) — &lt; 20 警告<br><strong>PL</strong>: phred-scaled likelihood of GT (0/0, 0/1, 1/1)</p></div>
+<div data-lang="en"><p><strong>GT</strong>: genotype (0/0 hom-ref, 0/1 het, 1/1 hom-alt, ./. missing)<br><strong>AD</strong>: per-allele depths (ref, alt)<br><strong>DP</strong>: sample-site depth<br><strong>GQ</strong>: genotype quality (Phred) — flag if &lt; 20<br><strong>PL</strong>: phred-scaled likelihoods for (0/0, 0/1, 1/1)</p></div>
+</div>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="決策引導" data-en="DECISION GUIDE">決策引導</div>
+<h2 data-zh="四、Caller 選擇" data-en="IV. Caller Selection">四、Caller 選擇</h2>
+<div class="decision-tree">
+<h4>🌳 <span data-zh="變異呼叫器決策樹" data-en="Caller Decision Tree">變異呼叫器決策樹</span></h4>
+<div data-lang="zh">
+<div class="dt-node"><span class="dt-q">Q1:</span><div>大型 cohort (n &gt; 100)、joint calling？<span class="dt-arrow">→ 是 →</span> <strong>GATK HaplotypeCaller GVCF + GenomicsDBImport + GenotypeGVCFs</strong></div></div>
+<div class="dt-node"><span class="dt-q">Q2:</span><div>單樣本 / 小批次 Illumina germline？<span class="dt-arrow">→ 是 →</span> <strong>DeepVariant</strong>（最高 indel 精確度，無需 BQSR）</div></div>
+<div class="dt-node"><span class="dt-q">Q3:</span><div>長讀長 (ONT / PacBio HiFi)？<span class="dt-arrow">→ 是 →</span> <strong>Clair3</strong>（或 PEPPER-Margin-DeepVariant for ONT phased）</div></div>
+<div class="dt-node"><span class="dt-q">Q4:</span><div>somatic（腫瘤）變異？<span class="dt-arrow">→ 是 →</span> <strong>GATK Mutect2</strong>（best practice）或 Strelka2、DeepSomatic</div></div>
+<div class="dt-node"><span class="dt-q">Q5:</span><div>快速 prototype / 教學？<span class="dt-arrow">→ 是 →</span> <strong>bcftools mpileup + call</strong>（最簡單）</div></div>
+</div>
+<div data-lang="en">
+<div class="dt-node"><span class="dt-q">Q1:</span><div>Large cohort (n &gt; 100), joint calling? <span class="dt-arrow">→ Yes →</span> <strong>GATK HaplotypeCaller GVCF + GenomicsDBImport + GenotypeGVCFs</strong></div></div>
+<div class="dt-node"><span class="dt-q">Q2:</span><div>Single sample / small batch Illumina germline? <span class="dt-arrow">→ Yes →</span> <strong>DeepVariant</strong> (best indel precision, no BQSR needed)</div></div>
+<div class="dt-node"><span class="dt-q">Q3:</span><div>Long reads (ONT / PacBio HiFi)? <span class="dt-arrow">→ Yes →</span> <strong>Clair3</strong> (or PEPPER-Margin-DeepVariant for ONT phased)</div></div>
+<div class="dt-node"><span class="dt-q">Q4:</span><div>Somatic (tumor) variants? <span class="dt-arrow">→ Yes →</span> <strong>GATK Mutect2</strong> (best practice), Strelka2, or DeepSomatic</div></div>
+<div class="dt-node"><span class="dt-q">Q5:</span><div>Fast prototyping / teaching? <span class="dt-arrow">→ Yes →</span> <strong>bcftools mpileup + call</strong> (simplest)</div></div>
+</div>
+</div>
+
+<div class="callout warn"><span class="callout-icon">⚠️</span><div>
+<span data-lang="zh"><strong>常見錯誤：</strong>① 多樣本各自呼叫後 merge VCF（會遺失 rare variant 證據）→ 改用 GVCF + joint genotyping；② RNA-seq 直接用 HaplotypeCaller（必須先 SplitNCigarReads）；③ 沒做 VQSR / hard filtering → 大量 false positives 流入下游。</span>
+<span data-lang="en"><strong>Common mistakes:</strong> ① Calling each sample separately then merging VCFs (loses rare variant evidence) → use GVCF + joint genotyping; ② Feeding RNA-seq directly to HaplotypeCaller (must SplitNCigarReads first); ③ Skipping VQSR / hard filtering → flood of false positives.</span>
+</div></div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="程式碼" data-en="CODE">程式碼</div>
+<h2 data-zh="變異呼叫實作" data-en="Variant Calling Examples">變異呼叫實作</h2>
+<div class="code-tabs">
+<div class="code-tab-btns">
+  <button class="code-tab-btn active" onclick="switchTab(this,'b1')">Bash (GATK)</button>
+  <button class="code-tab-btn" onclick="switchTab(this,'b2')">Bash (DeepVariant)</button>
+  <button class="code-tab-btn" onclick="switchTab(this,'b3')">Bash (bcftools)</button>
+  <button class="code-tab-btn" onclick="switchTab(this,'p1')">Python (cyvcf2)</button>
+</div>
+<div class="code-tab-content active" id="b1"><pre><span class="comment"># --- GATK HaplotypeCaller + GVCF + Joint Genotyping (per-cohort) ---</span>
+<span class="comment"># 1. 每樣本產 GVCF / Per-sample GVCF</span>
+<span class="kw">for</span> s <span class="kw">in</span> S1 S2 S3; <span class="kw">do</span>
+  gatk HaplotypeCaller \
+       -R ref/hg38.fa \
+       -I bam/${s}.recal.bam \
+       -O gvcf/${s}.g.vcf.gz \
+       -ERC GVCF
+<span class="kw">done</span>
+
+<span class="comment"># 2. 合併到 GenomicsDB / Build GenomicsDB</span>
+gatk GenomicsDBImport \
+     -V gvcf/S1.g.vcf.gz -V gvcf/S2.g.vcf.gz -V gvcf/S3.g.vcf.gz \
+     --genomicsdb-workspace-path my_db \
+     --intervals chr22
+
+<span class="comment"># 3. Joint genotyping / Joint genotyping</span>
+gatk GenotypeGVCFs \
+     -R ref/hg38.fa \
+     -V gendb://my_db \
+     -O cohort.vcf.gz
+
+<span class="comment"># 4. VQSR or hard-filter</span>
+gatk VariantFiltration \
+     -R ref/hg38.fa -V cohort.vcf.gz \
+     --filter-expression <span class="str">"QD &lt; 2.0"</span>  --filter-name QD2 \
+     --filter-expression <span class="str">"FS &gt; 60.0"</span> --filter-name FS60 \
+     --filter-expression <span class="str">"MQ &lt; 40.0"</span> --filter-name MQ40 \
+     -O cohort.filtered.vcf.gz</pre></div>
+
+<div class="code-tab-content" id="b2"><pre><span class="comment"># --- DeepVariant (Docker / Singularity) ---</span>
+docker run -v $(pwd):/data google/deepvariant:1.8.0 \
+  /opt/deepvariant/bin/run_deepvariant \
+    --model_type=WGS \
+    --ref=/data/ref/hg38.fa \
+    --reads=/data/bam/S1.dedup.bam \
+    --output_vcf=/data/vcf/S1.deepvariant.vcf.gz \
+    --output_gvcf=/data/vcf/S1.deepvariant.g.vcf.gz \
+    --num_shards=<span class="num">16</span>
+
+<span class="comment"># Joint genotyping with GLnexus</span>
+glnexus_cli --config DeepVariantWGS \
+            S1.deepvariant.g.vcf.gz S2.deepvariant.g.vcf.gz \
+  | bcftools view -Oz -o cohort.dv.vcf.gz</pre></div>
+
+<div class="code-tab-content" id="b3"><pre><span class="comment"># --- bcftools (輕量、適合教學) ---</span>
+bcftools mpileup -f ref/hg38.fa -Ou bam/S1.recal.bam | \
+  bcftools call -mv -Oz -o S1.bcf.vcf.gz
+bcftools index -t S1.bcf.vcf.gz
+
+<span class="comment"># 基本品質過濾 / Basic QC filter</span>
+bcftools filter -e <span class="str">'QUAL&lt;20 || DP&lt;10'</span> -s LowQual -Oz \
+  -o S1.bcf.filtered.vcf.gz S1.bcf.vcf.gz
+
+<span class="comment"># 看統計 / Stats</span>
+bcftools stats S1.bcf.filtered.vcf.gz | <span class="func">grep</span> ^SN</pre></div>
+
+<div class="code-tab-content" id="p1"><pre><span class="comment"># cyvcf2 — 高效 VCF 走訪 / Fast VCF iteration</span>
+<span class="kw">from</span> cyvcf2 <span class="kw">import</span> VCF
+
+<span class="kw">for</span> v <span class="kw">in</span> VCF(<span class="str">"cohort.vcf.gz"</span>):
+    <span class="kw">if</span> v.FILTER <span class="kw">is not</span> <span class="kw">None</span>: <span class="kw">continue</span>      <span class="comment"># skip filtered</span>
+    <span class="kw">if</span> v.is_snp <span class="kw">and</span> v.QUAL &gt; <span class="num">30</span> <span class="kw">and</span> v.INFO.get(<span class="str">"DP"</span>) &gt; <span class="num">10</span>:
+        ad  = v.format(<span class="str">"AD"</span>)             <span class="comment"># shape: (n_samples, 2)</span>
+        gq  = v.format(<span class="str">"GQ"</span>)
+        vaf = ad[:, <span class="num">1</span>] / ad.sum(axis=<span class="num">1</span>)
+        <span class="func">print</span>(v.CHROM, v.POS, v.REF, v.ALT[<span class="num">0</span>], v.QUAL, vaf)
+
+<span class="comment"># 取得樣本基因型 / Sample genotypes</span>
+v = <span class="func">next</span>(VCF(<span class="str">"cohort.vcf.gz"</span>))
+<span class="func">print</span>(v.gt_types)   <span class="comment"># 0=hom-ref, 1=het, 2=unknown, 3=hom-alt</span>
+<span class="func">print</span>(v.gt_phases)  <span class="comment"># True if phased (|)</span></pre></div>
+</div>
+</section>
+
+<section class="quiz-section">
+<h3>📝 <span data-zh="自我檢測" data-en="Self-Check">自我檢測</span></h3>
+<div class="quiz-q" data-answer="1">
+<p data-lang="zh">1. VCF 中 GT="0/1" 代表？</p>
+<p data-lang="en">1. In VCF, GT="0/1" means?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. 同型參考</span><span data-lang="en">A. Homozygous reference</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. 雜合（一條 ref / 一條 alt）</span><span data-lang="en">B. Heterozygous (one ref, one alt)</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. 同型 alt</span><span data-lang="en">C. Homozygous alt</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. 未呼叫</span><span data-lang="en">D. No call</span></div>
+</div><div class="quiz-feedback" id="fb1"></div></div>
+
+<div class="quiz-q" data-answer="2">
+<p data-lang="zh">2. 為什麼大型 cohort 推薦用 GVCF + joint genotyping，而非單獨呼叫後 merge？</p>
+<p data-lang="en">2. Why does GVCF + joint genotyping outperform per-sample calling then merging?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. 速度更快</span><span data-lang="en">A. It's faster</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. 不需要 reference 基因組</span><span data-lang="en">B. Doesn't need a reference</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. 保留 "non-variant" 樣本的證據，提升 rare variant 偵測力</span><span data-lang="en">C. Retains "non-variant" evidence from each sample, boosting rare-variant sensitivity</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. 自動移除 false positives</span><span data-lang="en">D. Automatically removes false positives</span></div>
+</div><div class="quiz-feedback" id="fb2"></div></div>
+
+<div class="quiz-q" data-answer="2">
+<p data-lang="zh">3. RNA-seq BAM 直接餵給 GATK HaplotypeCaller 會發生什麼？</p>
+<p data-lang="en">3. What happens if you feed RNA-seq BAM directly to GATK HaplotypeCaller?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. 完全沒問題</span><span data-lang="en">A. No issues</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. 結果與 DNA-seq 完全相同</span><span data-lang="en">B. Identical to DNA-seq results</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. CIGAR 中的 N (splice) 會干擾 — 需先用 SplitNCigarReads 拆開</span><span data-lang="en">C. The N (splice) operator interferes — must run SplitNCigarReads first</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. GATK 拒絕讀取</span><span data-lang="en">D. GATK refuses to read it</span></div>
+</div><div class="quiz-feedback" id="fb3"></div></div>
+</section>
+
+<nav class="page-nav">
+<a href="postalign.html"><span class="nav-dir" data-zh="← 上一步" data-en="← Previous">← 上一步</span><span class="nav-title" data-zh="Step 4: 比對後處理 (Post-Alignment Processing)" data-en="Step 4: Post-Alignment Processing">Step 4: 比對後處理 (Post-Alignment Processing)</span></a>
+<a href="annotation.html"><span class="nav-dir" data-zh="下一步 →" data-en="Next →">下一步 →</span><span class="nav-title" data-zh="Step 6: 變異註釋與過濾" data-en="Step 6: Variant Annotation &amp; Filtering">Step 6: 變異註釋與過濾</span></a>
+</nav>
+</main>
+<footer class="site-footer">© Charlene — Genomics Interactive Tutorial</footer>
+<script src="i18n.js"></script>
+<script>
+window.addEventListener('scroll',()=>{const h=document.documentElement;document.getElementById('progressBar').style.width=(h.scrollTop/(h.scrollHeight-h.clientHeight))*100+'%';});
+function switchTab(b,id){const p=b.closest('.code-tabs');p.querySelectorAll('.code-tab-btn').forEach(x=>x.classList.remove('active'));p.querySelectorAll('.code-tab-content').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.getElementById(id).classList.add('active');}
+
+// Genotype likelihood chart
+const gtChart=new Chart(document.getElementById('gtChart'),{type:'bar',data:{labels:['0/0','0/1','1/1'],datasets:[{label:'log10 likelihood (relative)',data:[0,0,0],backgroundColor:['#3b82f6','#1a6b5a','#d4a03c']}]},options:{responsive:true,maintainAspectRatio:false,scales:{y:{title:{display:true,text:'log10 likelihood'},beginAtZero:false}},plugins:{legend:{display:false}}}});
+
+function logChoose(n,k){let s=0;for(let i=1;i<=k;i++)s+=Math.log10((n-i+1)/i);return s;}
+function updateGT(){
+  const n=+document.getElementById('sliderN').value;
+  const k=Math.min(n,+document.getElementById('sliderK').value);
+  const e=+document.getElementById('sliderE').value;
+  if(+document.getElementById('sliderK').value>n){document.getElementById('sliderK').value=n;}
+  document.getElementById('valN').textContent=n;
+  document.getElementById('valK').textContent=k;
+  document.getElementById('valE').textContent=e.toFixed(3);
+  document.getElementById('sliderK').max=n;
+  // log10 likelihoods (excluding constant binomial coefficient — relative compare ok with same coefficient)
+  const c = logChoose(n,k);
+  const l00 = c + (n-k)*Math.log10(1-e) + k*Math.log10(e);
+  const l01 = c + n*Math.log10(0.5);
+  const l11 = c + k*Math.log10(1-e) + (n-k)*Math.log10(e);
+  const m = Math.max(l00,l01,l11);
+  // normalize for display
+  gtChart.data.datasets[0].data=[l00-m, l01-m, l11-m];
+  gtChart.update('none');
+  // find best
+  const gts=['0/0','0/1','1/1'];
+  const ls=[l00,l01,l11];
+  const best=ls.indexOf(m);
+  // Phred-scale GQ: difference to next best in -10*log
+  const sorted=[...ls].sort((a,b)=>b-a);
+  const gq=Math.min(99, Math.round(10*(sorted[0]-sorted[1])));
+  const L=I18n.get();
+  document.getElementById('gtCall').textContent=(L==='zh'?'呼叫: ':'Call: ')+gts[best];
+  document.getElementById('gtQ').textContent='GQ ≈ '+gq;
+}
+['sliderN','sliderK','sliderE'].forEach(id=>document.getElementById(id).addEventListener('input',updateGT));
+document.addEventListener('langchange',updateGT);
+updateGT();
+
+const QF={zh:{q1_y:'0/1 表示一條 ref allele、一條 alt allele 的雜合基因型。',q1_n:'正確答案已標示。',q2_y:'GVCF 保留每個樣本「沒有變異」的證據；單獨呼叫後 merge 會把另一樣本的 het 變成空白。',q2_n:'正確答案已標示。',q3_y:'RNA reads 跨 splice junction 的 N 會被當成大 deletion；必須先用 SplitNCigarReads。',q3_n:'正確答案已標示。'},en:{q1_y:'0/1 = one ref allele + one alt allele (heterozygous).',q1_n:'Correct answer highlighted.',q2_y:'GVCF retains non-variant evidence per sample; merging single-sample VCFs loses het calls from other samples.',q2_n:'Correct answer highlighted.',q3_y:'RNA reads with splice-N are treated as large deletions; SplitNCigarReads is required first.',q3_n:'Correct answer highlighted.'}};
+document.querySelectorAll('.quiz-q').forEach((q,qi)=>{const ans=+q.dataset.answer;q.querySelectorAll('.quiz-opt').forEach(o=>{o.addEventListener('click',()=>{if(q.classList.contains('answered'))return;q.classList.add('answered');const fb=document.getElementById('fb'+(qi+1));const ok=+o.dataset.idx===ans;o.classList.add(ok?'correct':'wrong');if(!ok)q.querySelectorAll('.quiz-opt')[ans].classList.add('correct');const L=I18n.get();fb.className='quiz-feedback show '+(ok?'correct-fb':'wrong-fb');fb.textContent=(ok?'✅ ':'❌ ')+(QF[L]['q'+(qi+1)+'_'+(ok?'y':'n')]||'');});});});
+</script>
+</body></html>

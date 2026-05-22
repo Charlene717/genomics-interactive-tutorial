@@ -1,0 +1,308 @@
+<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Step 7: SV / CNV — Genomics Tutorial</title>
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+</head><body>
+<nav class="top-nav"><div class="top-nav-inner">
+  <a href="index.html" class="top-nav-brand"><span>🧬</span> <span data-zh="基因體學教學" data-en="Genomics Tutorial">基因體學教學</span></a>
+  <ul class="top-nav-links"><li><a href="sequencing.html">Seq</a></li><li><a href="qc.html">QC</a></li><li><a href="alignment.html">Align</a></li><li><a href="postalign.html">PostAlign</a></li><li><a href="variant-calling.html">VarCall</a></li><li><a href="annotation.html">Annot</a></li><li><a href="sv-cnv.html" class="active">SV/CNV</a></li><li><a href="rnaseq.html">RNA-seq</a></li><li><a href="chip-atac.html">ChIP/ATAC</a></li><li><a href="methylation.html">Methyl</a></li><li><a href="gwas.html">GWAS</a></li><li><a href="popgen.html">PopGen</a></li><li><a href="enrichment.html">Enrich</a></li><li><a href="workflow.html">Pipeline</a></li>
+    <li><a href="references/index.html" data-zh="📚 參考資料" data-en="📚 References">📚 參考資料</a></li>
+  </ul>
+</div></nav>
+<div class="progress-bar-container"><div class="progress-bar" id="progressBar"></div></div>
+<header class="page-hero"><div class="step-badge">STEP 7 / 14</div>
+<h1 data-zh="結構變異與 CNV (SV & CNV)" data-en="Structural Variants & CNVs">結構變異與 CNV</h1>
+<p class="subtitle" data-lang="zh">超過 50 bp 的重排——刪除、重複、倒置、易位、跨基因的拷貝數改變。</p>
+<p class="subtitle" data-lang="en">Rearrangements above 50 bp — deletions, duplications, inversions, translocations, and copy-number changes.</p>
+</header>
+<main class="content-wrap">
+
+<section class="section">
+<div class="section-label" data-zh="概覽" data-en="OVERVIEW">概覽</div>
+<h2 data-zh="SV / CNV 為什麼難？" data-en="Why are SV / CNV hard?">SV / CNV 為什麼難？</h2>
+<div data-lang="zh">
+<p>SNV/Indel 在一個 read 內就能看到；但 <strong>SV（&gt; 50 bp）通常跨越一整條 read</strong>，必須從間接訊號推斷：<strong>split reads</strong>（一條 read 兩段比對到不同位置）、<strong>discordant pairs</strong>（paired-end 距離異常）、<strong>read depth 改變</strong>（CNV）、<strong>de novo assembly</strong>（長讀長重新組裝）。</p>
+<p>研究顯示，<strong>大多數人類功能性變異實際上是 SV/CNV，不是 SNV</strong>。但短讀長 caller 的 SV 召回率只有 30–60%；長讀長則可達 90%+。這也是 2025 年長讀長定序快速崛起的主因。</p>
+</div>
+<div data-lang="en">
+<p>SNVs/Indels are visible within a single read; <strong>SVs (&gt; 50 bp) typically span an entire read</strong>, so they must be inferred from indirect signals: <strong>split reads</strong> (one read aligns to two locations), <strong>discordant pairs</strong> (abnormal paired-end distance), <strong>read depth changes</strong> (CNV), <strong>de novo assembly</strong> (long-read).</p>
+<p>Research shows <strong>most functional human variants are actually SVs/CNVs, not SNVs</strong>. But short-read SV callers achieve only 30–60% recall; long-read callers reach 90%+. This drove the long-read sequencing explosion in 2025.</p>
+</div>
+<div class="callout tip"><span class="callout-icon">💡</span><div>
+<span data-lang="zh"><strong>核心原則：</strong>不要只用一個工具！<strong>多工具 ensemble (Manta + Delly + GRIDSS)</strong> 是短讀長 SV 的 best practice。SURVIVOR / Truvari 可比較整合多個 VCF。長讀長則一個 Sniffles2 / cuteSV 通常就夠。</span>
+<span data-lang="en"><strong>Core principle:</strong> Don't use a single tool! <strong>Multi-caller ensemble (Manta + Delly + GRIDSS)</strong> is best practice for short-read SVs. SURVIVOR / Truvari merge multiple VCFs. For long reads, Sniffles2 / cuteSV alone is usually enough.</span>
+</div></div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="SV 類型" data-en="SV TYPES">SV 類型</div>
+<h2 data-zh="一、五大 SV 類別" data-en="I. Five SV Classes">一、五大 SV 類別</h2>
+<div class="card-grid cols-2">
+<div class="card"><div class="card-icon">➖</div><h4>DEL — Deletion</h4>
+<div data-lang="zh"><p>區段從基因組中刪除。<strong>訊號：</strong>覆蓋深度↓、paired insert size↑、split reads 跨 breakpoint。<strong>常見尺寸：</strong>50 bp–10 Mb。<strong>例：</strong>Duchenne 肌肉萎縮症的 DMD 外顯子缺失。</p></div>
+<div data-lang="en"><p>Segment removed from genome. <strong>Signals:</strong> coverage↓, paired insert size↑, split reads across breakpoints. <strong>Size:</strong> 50 bp–10 Mb. <strong>Example:</strong> DMD exon deletions in Duchenne muscular dystrophy.</p></div>
+</div>
+<div class="card"><div class="card-icon">➕</div><h4>DUP — Duplication</h4>
+<div data-lang="zh"><p>區段重複插入（tandem 或 dispersed）。<strong>訊號：</strong>覆蓋深度↑、特殊 split 模式（read 的 3' 端比對到 5' 端）。<strong>例：</strong>17p11.2 的 PMP22 重複造成 Charcot-Marie-Tooth 1A。</p></div>
+<div data-lang="en"><p>Segment duplicated (tandem or dispersed). <strong>Signals:</strong> coverage↑, characteristic split pattern (3' end of read aligns to 5' end). <strong>Example:</strong> 17p11.2 PMP22 duplication causing CMT1A.</p></div>
+</div>
+<div class="card"><div class="card-icon">🔄</div><h4>INV — Inversion</h4>
+<div data-lang="zh"><p>區段方向反轉。<strong>訊號：</strong>覆蓋深度<strong>不變</strong>、paired-end strand orientation 異常（FR → FF / RR）、split reads 跨兩個 breakpoints。<strong>例：</strong>F8 intron 22 倒置造成 ~50% 的血友病 A。</p></div>
+<div data-lang="en"><p>Segment flipped. <strong>Signals:</strong> coverage <strong>unchanged</strong>, abnormal paired-end strand orientation (FR → FF / RR), split reads at both breakpoints. <strong>Example:</strong> F8 intron 22 inversion causes ~50% of hemophilia A.</p></div>
+</div>
+<div class="card"><div class="card-icon">➡️</div><h4>INS — Insertion</h4>
+<div data-lang="zh"><p>新序列插入基因組。<strong>挑戰：</strong>若插入長度 &gt; read length，短讀長幾乎無法解析；長讀長能完整跨越。<strong>例：</strong>SVA / LINE-1 retrotransposon、Friedreich ataxia 的 GAA 重複擴張。</p></div>
+<div data-lang="en"><p>New sequence inserted into genome. <strong>Challenge:</strong> if insertion length &gt; read length, short reads can hardly resolve; long reads span it entirely. <strong>Example:</strong> SVA/LINE-1 retrotransposons, Friedreich ataxia GAA repeat expansion.</p></div>
+</div>
+<div class="card"><div class="card-icon">🔁</div><h4>TRA / BND — Translocation / Breakend</h4>
+<div data-lang="zh"><p>跨染色體的重排（或單一 breakend）。<strong>訊號：</strong>paired-end / split reads 比對到不同染色體。<strong>例：</strong>BCR-ABL t(9;22) Philadelphia 染色體（慢性骨髓性白血病）。</p></div>
+<div data-lang="en"><p>Inter-chromosomal rearrangement (or single breakend). <strong>Signals:</strong> paired-end / split reads mapping to different chromosomes. <strong>Example:</strong> BCR-ABL t(9;22) Philadelphia chromosome in CML.</p></div>
+</div>
+<div class="card"><div class="card-icon">🧮</div><h4>CNV — Copy Number Variant</h4>
+<div data-lang="zh"><p>覆蓋深度推斷的整體拷貝數改變（0/1/2/3+）。<strong>方法：</strong>logR ratio + BAF，搭配 HMM 或 circular binary segmentation。<strong>區別：</strong>SV 是 breakpoint-resolved；CNV 通常 region-level，不知精確 breakpoint。</p></div>
+<div data-lang="en"><p>Coverage-based estimate of total copy number (0/1/2/3+). <strong>Method:</strong> logR ratio + BAF, with HMM or circular binary segmentation. <strong>Distinction:</strong> SVs are breakpoint-resolved; CNVs are region-level without exact breakpoints.</p></div>
+</div>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="互動模擬" data-en="INTERACTIVE">互動模擬</div>
+<h2 data-zh="二、SV 訊號視覺化" data-en="II. SV Signal Visualization">二、SV 訊號視覺化</h2>
+<div data-lang="zh"><p>選擇一種 SV 類型，觀察 paired-end reads 與 coverage 的特徵訊號。</p></div>
+<div data-lang="en"><p>Pick an SV type to see how paired-end reads and coverage form characteristic signatures.</p></div>
+
+<div class="interactive-panel">
+<div class="toggle-row">
+  <button class="toggle-btn active" data-sv="DEL" onclick="setSV(this,'DEL')">DEL</button>
+  <button class="toggle-btn" data-sv="DUP" onclick="setSV(this,'DUP')">DUP</button>
+  <button class="toggle-btn" data-sv="INV" onclick="setSV(this,'INV')">INV</button>
+  <button class="toggle-btn" data-sv="INS" onclick="setSV(this,'INS')">INS</button>
+  <button class="toggle-btn" data-sv="NORMAL" onclick="setSV(this,'NORMAL')">Normal</button>
+</div>
+<div class="chart-container" style="height:280px"><canvas id="svChart"></canvas></div>
+<div id="svExplain" style="margin-top:12px;font-size:.92rem;line-height:1.6;color:var(--c-ink-light)"></div>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="主流工具" data-en="TOOLS">主流工具</div>
+<h2 data-zh="三、SV/CNV 工具一覽" data-en="III. SV/CNV Tool Landscape">三、SV/CNV 工具一覽</h2>
+<table class="comp-table">
+<thead><tr><th data-zh="工具" data-en="Tool">工具</th><th data-zh="平台" data-en="Platform">平台</th><th data-zh="訊號" data-en="Signal">訊號</th><th data-zh="強項" data-en="Strength">強項</th></tr></thead>
+<tbody>
+<tr><td><strong>Manta</strong></td><td>Illumina</td><td data-lang="zh">discordant + split + assembly</td><td data-lang="zh">germline + somatic、breakend 精確</td><td data-lang="en">discordant + split + assembly</td><td data-lang="en">Germline + somatic, precise breakends</td></tr>
+<tr><td><strong>Delly</strong></td><td>Illumina</td><td data-lang="zh">discordant + split + read-depth</td><td data-lang="zh">大規模 cohort, panel-of-normals</td><td data-lang="en">discordant + split + read-depth</td><td data-lang="en">Large cohorts, panel-of-normals</td></tr>
+<tr><td><strong>GRIDSS</strong></td><td>Illumina</td><td data-lang="zh">assembly-based</td><td data-lang="zh">複雜重排、嵌合 SV</td><td data-lang="en">assembly-based</td><td data-lang="en">Complex rearrangements, chimeric SVs</td></tr>
+<tr><td><strong>Sniffles2</strong></td><td>ONT / PacBio</td><td data-lang="zh">長讀長 split + insertion sequence</td><td data-lang="zh">最新主流長讀長 SV caller、population-scale</td><td data-lang="en">long-read split + ins sequence</td><td data-lang="en">Mainstream long-read SV, population scale</td></tr>
+<tr><td><strong>cuteSV / SVIM</strong></td><td>ONT / PacBio</td><td data-lang="zh">長讀長 split + ins</td><td data-lang="zh">小數據集準確、SVIM 對複雜 SV 友善</td><td data-lang="en">long-read split + ins</td><td data-lang="en">Accurate on small datasets, SVIM handles complex SVs</td></tr>
+<tr><td><strong>CNVkit</strong></td><td>WES / WGS</td><td data-lang="zh">read depth (target + off-target)</td><td data-lang="zh">WES somatic CNV、低 input</td><td data-lang="en">Read depth (target + off-target)</td><td data-lang="en">WES somatic CNV, low input</td></tr>
+<tr><td><strong>GATK gCNV</strong></td><td>WES / WGS</td><td data-lang="zh">read depth + cohort prior</td><td data-lang="zh">germline rare CNV, large cohort</td><td data-lang="en">Read depth + cohort prior</td><td data-lang="en">Germline rare CNV, large cohort</td></tr>
+</tbody></table>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="決策引導" data-en="DECISION GUIDE">決策引導</div>
+<h2 data-zh="四、SV/CNV 工具選擇" data-en="IV. SV/CNV Tool Selection">四、SV/CNV 工具選擇</h2>
+<div class="decision-tree">
+<h4>🌳 <span data-zh="SV/CNV 工具選擇" data-en="Tool Selection">SV/CNV 工具選擇</span></h4>
+<div data-lang="zh">
+<div class="dt-node"><span class="dt-q">Q1:</span><div>長讀長資料（ONT / PacBio）？<span class="dt-arrow">→ 是 →</span> <strong>Sniffles2 + cuteSV</strong>（ensemble），SURVIVOR 整合</div></div>
+<div class="dt-node"><span class="dt-q">Q2:</span><div>Illumina germline SV？<span class="dt-arrow">→ 是 →</span> <strong>Manta + Delly</strong> ensemble；用 SURVIVOR/Truvari 合併</div></div>
+<div class="dt-node"><span class="dt-q">Q3:</span><div>Illumina 腫瘤 somatic SV？<span class="dt-arrow">→ 是 →</span> <strong>Manta + GRIDSS</strong>（複雜重排）</div></div>
+<div class="dt-node"><span class="dt-q">Q4:</span><div>WES + 想找 large CNV？<span class="dt-arrow">→ 是 →</span> <strong>CNVkit</strong>（單樣本）或 <strong>GATK gCNV</strong>（cohort）</div></div>
+<div class="dt-node"><span class="dt-q">Q5:</span><div>需要 Mendelian disease 評估？<span class="dt-arrow">→ 是 →</span> 註釋 AnnotSV，過濾 DECIPHER / ClinGen pathogenic CNV map</div></div>
+</div>
+<div data-lang="en">
+<div class="dt-node"><span class="dt-q">Q1:</span><div>Long-read data (ONT / PacBio)? <span class="dt-arrow">→ Yes →</span> <strong>Sniffles2 + cuteSV</strong> ensemble; merge with SURVIVOR</div></div>
+<div class="dt-node"><span class="dt-q">Q2:</span><div>Illumina germline SV? <span class="dt-arrow">→ Yes →</span> <strong>Manta + Delly</strong> ensemble; merge with SURVIVOR/Truvari</div></div>
+<div class="dt-node"><span class="dt-q">Q3:</span><div>Illumina somatic SV in tumors? <span class="dt-arrow">→ Yes →</span> <strong>Manta + GRIDSS</strong> (complex rearrangements)</div></div>
+<div class="dt-node"><span class="dt-q">Q4:</span><div>WES + need large CNVs? <span class="dt-arrow">→ Yes →</span> <strong>CNVkit</strong> (single sample) or <strong>GATK gCNV</strong> (cohort)</div></div>
+<div class="dt-node"><span class="dt-q">Q5:</span><div>Mendelian disease evaluation? <span class="dt-arrow">→ Yes →</span> Annotate with AnnotSV, filter against DECIPHER / ClinGen pathogenic CNV maps</div></div>
+</div>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="程式碼" data-en="CODE">程式碼</div>
+<h2 data-zh="SV / CNV 實作" data-en="SV / CNV Examples">SV / CNV 實作</h2>
+<div class="code-tabs">
+<div class="code-tab-btns">
+  <button class="code-tab-btn active" onclick="switchTab(this,'b1')">Bash (Short-read)</button>
+  <button class="code-tab-btn" onclick="switchTab(this,'b2')">Bash (Long-read)</button>
+  <button class="code-tab-btn" onclick="switchTab(this,'b3')">Bash (CNV)</button>
+  <button class="code-tab-btn" onclick="switchTab(this,'p1')">Python</button>
+</div>
+<div class="code-tab-content active" id="b1"><pre><span class="comment"># --- Manta (germline) ---</span>
+configManta.py \
+    --bam S1.recal.bam \
+    --referenceFasta ref/hg38.fa \
+    --runDir manta_S1
+manta_S1/runWorkflow.py -m local -j <span class="num">16</span>
+<span class="comment"># 結果 / Output: results/variants/diploidSV.vcf.gz</span>
+
+<span class="comment"># --- Delly ---</span>
+delly call -t DEL -g ref/hg38.fa -o S1.delly.del.bcf S1.recal.bam
+delly call -t DUP -g ref/hg38.fa -o S1.delly.dup.bcf S1.recal.bam
+delly call -t INV -g ref/hg38.fa -o S1.delly.inv.bcf S1.recal.bam
+delly call -t TRA -g ref/hg38.fa -o S1.delly.tra.bcf S1.recal.bam
+bcftools concat -a S1.delly.*.bcf -Oz -o S1.delly.vcf.gz
+
+<span class="comment"># --- SURVIVOR ensemble (合併多個 caller) ---</span>
+<span class="kw">ls</span> manta.vcf delly.vcf gridss.vcf &gt; vcfs.txt
+SURVIVOR merge vcfs.txt <span class="num">500</span> <span class="num">2</span> <span class="num">1</span> <span class="num">1</span> <span class="num">0</span> <span class="num">30</span> merged.sv.vcf
+<span class="comment"># 500=max bp 距離, 2=至少 2 工具支持, 1=同型別, 1=同strand, 0=disable estimate, 30=min size</span></pre></div>
+
+<div class="code-tab-content" id="b2"><pre><span class="comment"># --- Sniffles2 (長讀長 SV) ---</span>
+sniffles --input ont.bam \
+         --reference ref/hg38.fa \
+         --vcf ont.sniffles.vcf.gz \
+         --tandem-repeats ref/human_GRCh38_no_alt_analysis_set.trf.bed \
+         --threads <span class="num">16</span>
+
+<span class="comment"># --- cuteSV (替代/ensemble) ---</span>
+cuteSV ont.bam ref/hg38.fa ont.cutesv.vcf cutesv_work/ \
+   --max_cluster_bias_INS <span class="num">100</span>    --diff_ratio_merging_INS <span class="num">0.3</span> \
+   --max_cluster_bias_DEL <span class="num">100</span>    --diff_ratio_merging_DEL <span class="num">0.3</span> \
+   --threads <span class="num">16</span> --sample S1
+
+<span class="comment"># --- 用 Sniffles2 做 population SV calling ---</span>
+sniffles --input S1.bam --reference ref/hg38.fa --snf S1.snf
+sniffles --input S2.bam --reference ref/hg38.fa --snf S2.snf
+sniffles --input S1.snf S2.snf --vcf cohort.sv.vcf.gz   <span class="comment"># 合併</span></pre></div>
+
+<div class="code-tab-content" id="b3"><pre><span class="comment"># --- CNVkit (somatic / WES) ---</span>
+cnvkit.py batch tumor.bam --normal normal.bam \
+    --targets exome.bed \
+    --fasta ref/hg38.fa \
+    --output-reference ref.cnn \
+    --output-dir cnvkit_out/ \
+    -p <span class="num">16</span>
+cnvkit.py scatter -s tumor.cn{s,r} -o tumor.scatter.pdf
+cnvkit.py diagram -s tumor.cns -o tumor.diagram.pdf
+
+<span class="comment"># --- GATK gCNV (germline cohort) ---</span>
+gatk PreprocessIntervals -R ref/hg38.fa -L exome.bed --interval-merging-rule OVERLAPPING_ONLY -O intervals.interval_list
+gatk CollectReadCounts -I S1.bam -L intervals.interval_list -O S1.counts.hdf5
+gatk GermlineCNVCaller --run-mode COHORT -L intervals.interval_list \
+    -I S1.counts.hdf5 -I S2.counts.hdf5 ... \
+    --contig-ploidy-calls ploidy-calls --output-prefix cohort
+
+<span class="comment"># --- 註釋 AnnotSV ---</span>
+AnnotSV -SVinputFile merged.sv.vcf -outputFile merged.sv.annot.tsv \
+        -genomeBuild GRCh38 -annotationsDir AnnotSV_human/</pre></div>
+
+<div class="code-tab-content" id="p1"><pre><span class="comment"># 用 pysam 偵測 split + discordant reads（教學版）</span>
+<span class="kw">import</span> pysam, collections
+
+bam = pysam.AlignmentFile(<span class="str">"S1.bam"</span>, <span class="str">"rb"</span>)
+sig = collections.defaultdict(<span class="func">list</span>)
+
+<span class="kw">for</span> r <span class="kw">in</span> bam.fetch(<span class="str">"chr1"</span>, <span class="num">10_000_000</span>, <span class="num">10_500_000</span>):
+    <span class="kw">if</span> r.is_unmapped <span class="kw">or</span> r.is_secondary: <span class="kw">continue</span>
+    <span class="comment"># split read</span>
+    <span class="kw">if</span> r.has_tag(<span class="str">"SA"</span>):
+        sa = r.get_tag(<span class="str">"SA"</span>).split(<span class="str">";"</span>)[<span class="num">0</span>].split(<span class="str">","</span>)
+        sig[<span class="str">"split"</span>].append((r.reference_name, r.reference_start, sa[<span class="num">0</span>], <span class="func">int</span>(sa[<span class="num">1</span>])))
+    <span class="comment"># discordant: paired but unexpected insert / orientation</span>
+    <span class="kw">if</span> r.is_paired <span class="kw">and</span> <span class="kw">not</span> r.mate_is_unmapped:
+        <span class="kw">if</span> <span class="func">abs</span>(r.template_length) &gt; <span class="num">1000</span> <span class="kw">or</span> r.is_reverse == r.mate_is_reverse:
+            sig[<span class="str">"discordant"</span>].append((r.reference_name, r.reference_start, r.template_length))
+
+<span class="func">print</span>(<span class="str">"Split reads:"</span>, <span class="func">len</span>(sig[<span class="str">"split"</span>]))
+<span class="func">print</span>(<span class="str">"Discordant pairs:"</span>, <span class="func">len</span>(sig[<span class="str">"discordant"</span>]))</pre></div>
+</div>
+</section>
+
+<section class="quiz-section">
+<h3>📝 <span data-zh="自我檢測" data-en="Self-Check">自我檢測</span></h3>
+<div class="quiz-q" data-answer="1">
+<p data-lang="zh">1. 染色體倒置 (Inversion) 的最主要訊號？</p>
+<p data-lang="en">1. The hallmark signal of an inversion is?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. 覆蓋深度大幅下降</span><span data-lang="en">A. Sharp coverage drop</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. paired-end strand orientation 異常（FR → FF/RR）</span><span data-lang="en">B. Abnormal paired-end strand orientation (FR → FF/RR)</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. 變異 AF 接近 50%</span><span data-lang="en">C. Variant AF near 50%</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. 沒有 split reads</span><span data-lang="en">D. No split reads</span></div>
+</div><div class="quiz-feedback" id="fb1"></div></div>
+
+<div class="quiz-q" data-answer="2">
+<p data-lang="zh">2. 為什麼長讀長對 SV 偵測有優勢？</p>
+<p data-lang="en">2. Why do long reads excel at SV detection?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. 鹼基準確度更高</span><span data-lang="en">A. Higher base-level accuracy</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. 通量更高</span><span data-lang="en">B. Higher throughput</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. 單條 read 能完整跨越 SV breakpoint 與插入序列</span><span data-lang="en">C. A single read can span the entire SV breakpoint and insertion sequence</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. 不需要 reference</span><span data-lang="en">D. No reference needed</span></div>
+</div><div class="quiz-feedback" id="fb2"></div></div>
+
+<div class="quiz-q" data-answer="1">
+<p data-lang="zh">3. SV 與 CNV 最主要的差別？</p>
+<p data-lang="en">3. The main difference between SV and CNV?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. SV 只在腫瘤；CNV 只在 germline</span><span data-lang="en">A. SVs only in tumors; CNVs only germline</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. SV 通常 breakpoint-resolved；CNV 是 region-level 拷貝數變化</span><span data-lang="en">B. SVs are breakpoint-resolved; CNVs are region-level copy changes</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. SV 必須用長讀長</span><span data-lang="en">C. SVs require long reads</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. 沒有差別</span><span data-lang="en">D. No difference</span></div>
+</div><div class="quiz-feedback" id="fb3"></div></div>
+</section>
+
+<nav class="page-nav">
+<a href="annotation.html"><span class="nav-dir" data-zh="← 上一步" data-en="← Previous">← 上一步</span><span class="nav-title" data-zh="Step 6: 變異註釋與過濾" data-en="Step 6: Variant Annotation &amp; Filtering">Step 6: 變異註釋與過濾</span></a>
+<a href="rnaseq.html"><span class="nav-dir" data-zh="下一步 →" data-en="Next →">下一步 →</span><span class="nav-title" data-zh="Step 8: Bulk RNA-seq 差異表達分析" data-en="Step 8: Bulk RNA-seq Differential Expression">Step 8: Bulk RNA-seq 差異表達分析</span></a>
+</nav>
+</main>
+<footer class="site-footer">© Charlene — Genomics Interactive Tutorial</footer>
+<script src="i18n.js"></script>
+<script>
+window.addEventListener('scroll',()=>{const h=document.documentElement;document.getElementById('progressBar').style.width=(h.scrollTop/(h.scrollHeight-h.clientHeight))*100+'%';});
+function switchTab(b,id){const p=b.closest('.code-tabs');p.querySelectorAll('.code-tab-btn').forEach(x=>x.classList.remove('active'));p.querySelectorAll('.code-tab-content').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.getElementById(id).classList.add('active');}
+
+const svChart=new Chart(document.getElementById('svChart'),{type:'line',data:{labels:Array.from({length:50},(_,i)=>i*2),datasets:[{label:'Coverage',data:[],borderColor:'#1a6b5a',backgroundColor:'rgba(26,107,90,.18)',fill:true,tension:.3,pointRadius:0}]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{title:{display:true,text:'Genomic position (relative)'}},y:{title:{display:true,text:'Read depth'},beginAtZero:true,max:60}}}});
+
+const SV_PATTERNS={
+  NORMAL:{
+    cov: pos => 30 + (Math.sin(pos*.3)+Math.random()*2-1),
+    zh:'正常區段：覆蓋深度均勻、paired-end FR orientation、無 split reads。',
+    en:'Normal region: uniform coverage, FR paired-end orientation, no split reads.'
+  },
+  DEL:{
+    cov: pos => (pos>30 && pos<60) ? 1+Math.random()*2 : 30 + (Math.random()*2-1)*2,
+    zh:'<strong>Deletion：</strong>覆蓋深度在 30–60 位置降至 ≈ 0；paired-end insert size 突然增大（read pair 隔著缺失區）；split reads 跨 breakpoint。',
+    en:'<strong>Deletion:</strong> coverage drops to ≈0 between positions 30–60; paired-end insert size grows abruptly (pairs span the deletion); split reads at breakpoints.'
+  },
+  DUP:{
+    cov: pos => (pos>30 && pos<60) ? 60 + (Math.random()*2-1)*3 : 30 + (Math.random()*2-1)*2,
+    zh:'<strong>Duplication：</strong>區段覆蓋翻倍；split reads 的「3'-to-5'」配對特徵；paired-end 跨 boundary 可能 FF/RR orientation。',
+    en:'<strong>Duplication:</strong> coverage doubles in the region; split reads show "3\\'-to-5\\'" pairing; paired-end may show FF/RR orientation across boundaries.'
+  },
+  INV:{
+    cov: pos => 30 + (Math.random()*2-1)*2,
+    zh:'<strong>Inversion：</strong>覆蓋深度<strong>不變</strong>！訊號完全靠 paired-end strand 異常（FR → FF/RR）與兩端的 split reads。短讀長很容易漏掉。',
+    en:'<strong>Inversion:</strong> coverage <strong>unchanged</strong>! Signal comes entirely from paired-end orientation anomalies (FR → FF/RR) and split reads at both breakpoints. Easily missed by short-reads.'
+  },
+  INS:{
+    cov: pos => (pos>40 && pos<48) ? 35 + (Math.random()*4) : 30 + (Math.random()*2-1)*2,
+    zh:'<strong>Insertion：</strong>插入點附近覆蓋微升（堆疊 reads soft-clip）；若插入長度 &gt; read length，短讀長無法解析序列；長讀長一條 read 就跨過去。',
+    en:'<strong>Insertion:</strong> mild coverage spike near insertion (piled-up soft-clipped reads); if insertion &gt; read length, short reads cannot resolve the sequence; long reads span it in one piece.'
+  }
+};
+function setSV(btn,type){
+  document.querySelectorAll('.toggle-btn[data-sv]').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  const labels=Array.from({length:50},(_,i)=>i*2);
+  const data=labels.map((_,i)=>SV_PATTERNS[type].cov(i));
+  svChart.data.datasets[0].data=data;
+  svChart.update('none');
+  const L=I18n.get();
+  document.getElementById('svExplain').innerHTML=SV_PATTERNS[type][L]||SV_PATTERNS[type].en;
+}
+document.addEventListener('langchange',()=>{
+  const active=document.querySelector('.toggle-btn[data-sv].active');
+  if(active) setSV(active, active.dataset.sv);
+});
+setSV(document.querySelector('.toggle-btn[data-sv]'),'DEL');
+
+const QF={zh:{q1_y:'倒置區段內 paired-end 方向會變成 FF/RR，是其招牌訊號。',q1_n:'正確答案已標示。',q2_y:'長讀長能單條跨越整個 SV 與插入序列，根本性解決短讀長的訊號間接性。',q2_n:'正確答案已標示。',q3_y:'SV (Manta/Delly) 給 breakpoint 精確位置；CNV (CNVkit/gCNV) 只給 region-level 劑量改變。',q3_n:'正確答案已標示。'},en:{q1_y:'Paired-end orientation flips to FF/RR within the inverted segment — its signature.',q1_n:'Correct answer highlighted.',q2_y:'A single long read spans the entire SV and insertion, sidestepping the indirect-signal problem of short reads.',q2_n:'Correct answer highlighted.',q3_y:'SVs (Manta/Delly) report precise breakpoints; CNVs (CNVkit/gCNV) report region-level dosage only.',q3_n:'Correct answer highlighted.'}};
+document.querySelectorAll('.quiz-q').forEach((q,qi)=>{const ans=+q.dataset.answer;q.querySelectorAll('.quiz-opt').forEach(o=>{o.addEventListener('click',()=>{if(q.classList.contains('answered'))return;q.classList.add('answered');const fb=document.getElementById('fb'+(qi+1));const ok=+o.dataset.idx===ans;o.classList.add(ok?'correct':'wrong');if(!ok)q.querySelectorAll('.quiz-opt')[ans].classList.add('correct');const L=I18n.get();fb.className='quiz-feedback show '+(ok?'correct-fb':'wrong-fb');fb.textContent=(ok?'✅ ':'❌ ')+(QF[L]['q'+(qi+1)+'_'+(ok?'y':'n')]||'');});});});
+</script>
+</body></html>

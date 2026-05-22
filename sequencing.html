@@ -1,0 +1,280 @@
+<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Step 1: Sequencing & FASTQ — Genomics Tutorial</title>
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+</head><body>
+<nav class="top-nav"><div class="top-nav-inner">
+  <a href="index.html" class="top-nav-brand"><span>🧬</span> <span data-zh="基因體學教學" data-en="Genomics Tutorial">基因體學教學</span></a>
+  <ul class="top-nav-links"><li><a href="sequencing.html" class="active">Seq</a></li><li><a href="qc.html">QC</a></li><li><a href="alignment.html">Align</a></li><li><a href="postalign.html">PostAlign</a></li><li><a href="variant-calling.html">VarCall</a></li><li><a href="annotation.html">Annot</a></li><li><a href="sv-cnv.html">SV/CNV</a></li><li><a href="rnaseq.html">RNA-seq</a></li><li><a href="chip-atac.html">ChIP/ATAC</a></li><li><a href="methylation.html">Methyl</a></li><li><a href="gwas.html">GWAS</a></li><li><a href="popgen.html">PopGen</a></li><li><a href="enrichment.html">Enrich</a></li><li><a href="workflow.html">Pipeline</a></li>
+    <li><a href="references/index.html" data-zh="📚 參考資料" data-en="📚 References">📚 參考資料</a></li>
+  </ul>
+</div></nav>
+<div class="progress-bar-container"><div class="progress-bar" id="progressBar"></div></div>
+<header class="page-hero"><div class="step-badge">STEP 1 / 14</div>
+<h1 data-zh="定序技術與 FASTQ 格式" data-en="Sequencing Technologies & FASTQ Format">定序技術與 FASTQ 格式</h1>
+<p class="subtitle" data-lang="zh">從 Sanger 到 Nanopore，理解每個讀長背後的化學原理與資料格式。</p>
+<p class="subtitle" data-lang="en">From Sanger to Nanopore — understand the chemistry and data formats behind every read.</p>
+</header>
+<main class="content-wrap">
+
+<!-- ===== Section 1: Why ===== -->
+<section class="section">
+<div class="section-label" data-zh="概覽" data-en="OVERVIEW">概覽</div>
+<h2 data-zh="為什麼要先理解定序技術？" data-en="Why understand sequencing technology first?">為什麼要先理解定序技術？</h2>
+<div data-lang="zh">
+<p>所有下游分析（變異呼叫、表達量化、結構變異偵測）的 <strong>準確度上限</strong> 都受限於原始 reads 的特性：讀長、錯誤率、錯誤模式、覆蓋均勻度。短讀長（Illumina）擅長 SNV，但對長重複序列束手無策；長讀長（Nanopore/PacBio）能完整跨越複雜區域，但 base-level 錯誤率較高。<strong>選對平台</strong> 比選對軟體還重要。</p>
+<p>FASTQ 格式則是所有 NGS 分析的「共同語言」——每四行記錄一條 read，第四行的 Phred 品質字元字元背後對應的是 <strong>機率而非單一分數</strong>。理解這一點對 QC、變異過濾、覆蓋深度估算都至關重要。</p>
+</div>
+<div data-lang="en">
+<p>The accuracy of every downstream analysis (variant calling, expression quantification, SV detection) is fundamentally bounded by raw read properties: length, error rate, error mode, and coverage uniformity. Short reads (Illumina) excel at SNVs but stumble on long repeats; long reads (Nanopore/PacBio) span complex regions but carry higher base-level errors. <strong>Choosing the right platform</strong> matters more than choosing the right software.</p>
+<p>FASTQ is the lingua franca of NGS — four lines per read, with the 4th-line quality string encoding a <strong>probability, not a single score</strong>. Understanding this is critical for QC, variant filtering, and depth estimation.</p>
+</div>
+<div class="callout tip"><span class="callout-icon">💡</span><div>
+<span data-lang="zh"><strong>核心原則：</strong>讀長 × 通量 × 錯誤率 形成三角取捨。Illumina = 短/高/低；ONT = 長/中/中；PacBio HiFi = 中長/中/極低。</span>
+<span data-lang="en"><strong>Core principle:</strong> Read length × throughput × error rate form an iron triangle. Illumina = short/high/low; ONT = long/medium/medium; PacBio HiFi = medium-long/medium/ultra-low.</span>
+</div></div>
+</section>
+
+<!-- ===== Section 2: Platforms ===== -->
+<section class="section">
+<div class="section-label" data-zh="平台比較" data-en="PLATFORMS">平台比較</div>
+<h2 data-zh="一、主流定序平台" data-en="I. Major Sequencing Platforms">一、主流定序平台</h2>
+
+<div class="card-grid cols-2">
+<div class="card"><div class="card-icon">💎</div><h4>Illumina (SBS — Sequencing by Synthesis)</h4>
+<div data-lang="zh"><p>當前最普及的短讀長平台（NovaSeq X / NextSeq）。<strong>讀長：</strong>50–300 bp paired-end。<strong>錯誤率：</strong>&lt; 0.1%（per base）。<strong>強項：</strong>單鹼基準確、單次 run 通量極高（NovaSeq X 可達 16 Tb）、單位成本最低。<strong>弱項：</strong>長重複序列、結構變異、單體型 (haplotype) 解析能力有限。</p></div>
+<div data-lang="en"><p>The dominant short-read platform (NovaSeq X / NextSeq). <strong>Read length:</strong> 50–300 bp paired-end. <strong>Error rate:</strong> &lt; 0.1% per base. <strong>Strengths:</strong> per-base accuracy, massive throughput (up to 16 Tb on NovaSeq X), lowest cost-per-base. <strong>Weaknesses:</strong> long repeats, structural variants, haplotype phasing.</p></div>
+</div>
+<div class="card"><div class="card-icon">🧵</div><h4>Oxford Nanopore (ONT)</h4>
+<div data-lang="zh"><p>讀長最長（單條 read 可達 4 Mb 以上！）的奈米孔技術，鹼基通過孔洞時擾動電流訊號被即時偵測。<strong>讀長：</strong>中位數 10–100 kb，可達 Mb 級。<strong>錯誤率：</strong>當前 R10.4.1 化學 &lt; 1%（HAC/SUP basecalling）。<strong>強項：</strong>即時定序、可攜（MinION）、能直接偵測甲基化（5mC、6mA）。<strong>弱項：</strong>homopolymer indel 仍是難題。</p></div>
+<div data-lang="en"><p>Longest-read platform — single reads can exceed 4 Mb. Bases are detected as they perturb a current passing through a protein nanopore. <strong>Read length:</strong> median 10–100 kb, up to Mb-scale. <strong>Error rate:</strong> &lt;1% with R10.4.1 chemistry (HAC/SUP basecalling). <strong>Strengths:</strong> real-time sequencing, portable (MinION), direct methylation detection (5mC, 6mA). <strong>Weaknesses:</strong> homopolymer indels remain challenging.</p></div>
+</div>
+<div class="card"><div class="card-icon">🌀</div><h4>PacBio HiFi (Circular Consensus)</h4>
+<div data-lang="zh"><p>SMRT cell 上的 zero-mode waveguide 即時偵測單分子聚合反應；HiFi 模式將同一段 DNA 來回讀多次取共識序列。<strong>讀長：</strong>15–25 kb。<strong>錯誤率：</strong>HiFi &lt; 0.1%（與 Illumina 相當！）。<strong>強項：</strong>長 + 準，是 T2T 完整人類基因組組裝的關鍵；單體型 phasing 出色。<strong>弱項：</strong>單位成本仍高於 Illumina。</p></div>
+<div data-lang="en"><p>SMRT cells use zero-mode waveguides to detect single-polymerase activity in real time. HiFi mode reads the same DNA fragment in a circle to generate consensus. <strong>Read length:</strong> 15–25 kb. <strong>Error rate:</strong> &lt;0.1% — comparable to Illumina! <strong>Strengths:</strong> long + accurate, key to the T2T human genome; excellent haplotype phasing. <strong>Weaknesses:</strong> higher per-base cost than Illumina.</p></div>
+</div>
+<div class="card"><div class="card-icon">📜</div><h4>Sanger (Capillary)</h4>
+<div data-lang="zh"><p>第一代定序（1977）。如今主要用於 <strong>variant 驗證</strong>、microsatellite 分析與低通量檢測。<strong>讀長：</strong>800–1000 bp。<strong>錯誤率：</strong>&lt; 0.001%。<strong>適用：</strong>單一片段、低通量、極高準確度。NGS 流程中的「黃金標準」驗證工具。</p></div>
+<div data-lang="en"><p>First-generation sequencing (1977). Today mainly used for <strong>variant validation</strong>, microsatellite typing, and low-throughput assays. <strong>Read length:</strong> 800–1000 bp. <strong>Error rate:</strong> &lt; 0.001%. <strong>Use case:</strong> single fragments, low throughput, gold-standard validation in NGS workflows.</p></div>
+</div>
+</div>
+
+<table class="comp-table">
+<thead><tr>
+<th data-zh="平台" data-en="Platform">平台</th>
+<th data-zh="讀長" data-en="Read length">讀長</th>
+<th data-zh="錯誤率" data-en="Error rate">錯誤率</th>
+<th data-zh="通量" data-en="Throughput">通量</th>
+<th data-zh="主要應用" data-en="Primary use">主要應用</th>
+</tr></thead>
+<tbody>
+<tr><td><strong>Illumina NovaSeq X</strong></td><td>2×150 bp</td><td>&lt; 0.1%</td><td>16 Tb / run</td><td data-lang="zh">WGS、RNA-seq、ChIP-seq</td><td data-lang="en">WGS, RNA-seq, ChIP-seq</td></tr>
+<tr><td><strong>ONT PromethION</strong></td><td>10–100+ kb</td><td>~1% (R10.4.1)</td><td>5 Tb / run</td><td data-lang="zh">SV、組裝、甲基化</td><td data-lang="en">SV, assembly, methylation</td></tr>
+<tr><td><strong>PacBio Revio (HiFi)</strong></td><td>15–25 kb</td><td>&lt; 0.1%</td><td>360 Gb / run</td><td data-lang="zh">T2T 組裝、phasing</td><td data-lang="en">T2T assembly, phasing</td></tr>
+<tr><td><strong>Sanger ABI 3730</strong></td><td>800–1000 bp</td><td>&lt; 0.001%</td><td>96 reads / run</td><td data-lang="zh">變異驗證</td><td data-lang="en">Variant validation</td></tr>
+</tbody></table>
+</section>
+
+<!-- ===== Section 3: FASTQ Format ===== -->
+<section class="section">
+<div class="section-label" data-zh="資料格式" data-en="DATA FORMAT">資料格式</div>
+<h2 data-zh="二、FASTQ 格式解剖" data-en="II. Anatomy of a FASTQ Record">二、FASTQ 格式解剖</h2>
+<div data-lang="zh"><p>每條 read 在 FASTQ 檔中佔用 <strong>四行</strong>：</p></div>
+<div data-lang="en"><p>Each read occupies <strong>four lines</strong> in a FASTQ file:</p></div>
+
+<div class="code-tabs"><div class="code-tab-btns"><button class="code-tab-btn active" onclick="switchTab(this,'fq1')">Example</button></div>
+<div class="code-tab-content active" id="fq1"><pre><span class="comment"># Line 1: 標頭 (@ 開頭) — read ID、instrument、lane、tile、x/y、flag</span>
+<span class="kw">@SRR123456.1 HISEQ-1:123:H7Y3HBBXX:2:1101:1456:2086 1:N:0:ATCACG</span>
+<span class="comment"># Line 2: 鹼基序列 (A/T/G/C/N)</span>
+GATCACAGGTCTATCACCCTATTAACCACTCACGGGAGCTCTCCATGCATTTGGTATTTTCG
+<span class="comment"># Line 3: 分隔符 (+, 可選擇性重複 ID)</span>
++
+<span class="comment"># Line 4: 品質字串 (ASCII-33 編碼 Phred score)</span>
+<span class="str">CCCFFFFFHHHHHJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJ</span></pre></div>
+</div>
+
+<div class="callout warn"><span class="callout-icon">⚠️</span><div>
+<span data-lang="zh"><strong>編碼陷阱：</strong>現代資料（Illumina 1.8+、ONT、PacBio）都使用 <strong>Phred+33</strong>（ASCII 從 ! 開始）。但舊版 Illumina（1.3–1.5）用 Phred+64（@ 開始）。如果 FastQC 報告品質「過高」（出現 J 以上字元）或「過低」，可能是編碼判斷錯誤！</span>
+<span data-lang="en"><strong>Encoding pitfall:</strong> Modern data (Illumina 1.8+, ONT, PacBio) all use <strong>Phred+33</strong> (ASCII starts at !). But old Illumina (1.3–1.5) used Phred+64 (starts at @). If FastQC reports "abnormally high" or "low" quality, encoding may be misidentified.</span>
+</div></div>
+</section>
+
+<!-- ===== Section 4: Phred Interactive ===== -->
+<section class="section">
+<div class="section-label" data-zh="互動模擬" data-en="INTERACTIVE">互動模擬</div>
+<h2 data-zh="Phred 分數與錯誤機率轉換器" data-en="Phred ↔ Error Probability Converter">Phred 分數與錯誤機率轉換器</h2>
+<div data-lang="zh"><p>Phred score <strong>Q = -10 × log10(P)</strong>，其中 P 為錯誤鹼基的機率。拖動滑桿觀察轉換關係，並查看對應的 ASCII 字元（Phred+33）。</p></div>
+<div data-lang="en"><p>Phred score <strong>Q = -10 × log10(P)</strong>, where P is the probability of a wrong base call. Drag the slider to explore the conversion and see the corresponding ASCII character (Phred+33).</p></div>
+
+<div class="interactive-panel">
+<div class="sim-stats">
+  <span class="sim-stat pass" id="phredQ">Q = 30</span>
+  <span class="sim-stat pass" id="phredP">P = 0.001</span>
+  <span class="sim-stat pass" id="phredA">99.9% accuracy</span>
+  <span class="sim-stat pass" id="phredAscii">ASCII '?' (63)</span>
+</div>
+<div class="slider-group"><label><span data-zh="Phred 分數 (Q)" data-en="Phred score (Q)">Phred Score</span> <span id="valPhred">30</span></label><input type="range" id="sliderPhred" min="2" max="50" value="30" step="1"></div>
+<div class="chart-container"><canvas id="phredChart"></canvas></div>
+<p style="font-size:.82rem;color:var(--c-ink-muted);text-align:center;" data-lang="zh">X: Phred 分數 | Y: 錯誤機率（對數軸）</p>
+<p style="font-size:.82rem;color:var(--c-ink-muted);text-align:center;" data-lang="en">X: Phred score | Y: Error probability (log scale)</p>
+</div>
+
+<table class="comp-table">
+<thead><tr><th>Phred Q</th><th data-zh="錯誤機率" data-en="Error probability">錯誤機率</th><th data-zh="準確度" data-en="Accuracy">準確度</th><th data-zh="應用場景" data-en="Common use">應用場景</th></tr></thead>
+<tbody>
+<tr><td>Q10</td><td>1 in 10</td><td>90%</td><td data-lang="zh">ONT 早期化學的下限</td><td data-lang="en">ONT early chemistry floor</td></tr>
+<tr><td>Q20</td><td>1 in 100</td><td>99%</td><td data-lang="zh">trimming 最低標準</td><td data-lang="en">Minimum trimming standard</td></tr>
+<tr><td>Q30</td><td>1 in 1,000</td><td>99.9%</td><td data-lang="zh">Illumina 業界標準</td><td data-lang="en">Illumina industry baseline</td></tr>
+<tr><td>Q40</td><td>1 in 10,000</td><td>99.99%</td><td data-lang="zh">PacBio HiFi / Sanger</td><td data-lang="en">PacBio HiFi / Sanger</td></tr>
+</tbody></table>
+</section>
+
+<!-- ===== Section 5: Decision Tree ===== -->
+<section class="section">
+<div class="section-label" data-zh="平台選擇" data-en="PLATFORM CHOICE">平台選擇</div>
+<h2 data-zh="三、如何挑選合適的定序平台？" data-en="III. How to Choose a Sequencing Platform">三、如何挑選合適的定序平台？</h2>
+
+<div class="decision-tree">
+<h4>🌳 <span data-zh="平台選擇決策樹" data-en="Platform Selection Decision Tree">平台選擇決策樹</span></h4>
+<div data-lang="zh">
+<div class="dt-node"><span class="dt-q">Q1:</span><div>你主要分析的是 <strong>SNV/Indel</strong>，且樣本數大？<span class="dt-arrow">→ 是 →</span> Illumina NovaSeq X（30× WGS 約 $200，性價比最高）</div></div>
+<div class="dt-node"><span class="dt-q">Q2:</span><div>需要解析 <strong>結構變異、長重複、HLA 區域</strong>？<span class="dt-arrow">→ 是 →</span> PacBio HiFi（準確的長讀長），或 ONT（更長但需更深覆蓋）</div></div>
+<div class="dt-node"><span class="dt-q">Q3:</span><div>要做 <strong>de novo 組裝</strong>（無參考基因組的物種）？<span class="dt-arrow">→ 是 →</span> PacBio HiFi + ONT ultra-long + Hi-C（黃金組合）</div></div>
+<div class="dt-node"><span class="dt-q">Q4:</span><div>需要 <strong>直接偵測甲基化</strong> 而不想做 bisulfite？<span class="dt-arrow">→ 是 →</span> ONT（5mC、6mA 原生偵測）或 PacBio kinetics</div></div>
+<div class="dt-node"><span class="dt-q">Q5:</span><div>要 <strong>現場即時定序</strong>（病原體爆發、田野研究）？<span class="dt-arrow">→ 是 →</span> ONT MinION（手掌大小、USB 供電）</div></div>
+</div>
+<div data-lang="en">
+<div class="dt-node"><span class="dt-q">Q1:</span><div>Primarily calling <strong>SNV/Indel</strong> with many samples? <span class="dt-arrow">→ Yes →</span> Illumina NovaSeq X (30× WGS ~$200, best cost-effectiveness)</div></div>
+<div class="dt-node"><span class="dt-q">Q2:</span><div>Need to resolve <strong>SVs, long repeats, HLA region</strong>? <span class="dt-arrow">→ Yes →</span> PacBio HiFi (accurate long reads), or ONT (longer but needs deeper coverage)</div></div>
+<div class="dt-node"><span class="dt-q">Q3:</span><div>Doing <strong>de novo assembly</strong> (species without reference)? <span class="dt-arrow">→ Yes →</span> PacBio HiFi + ONT ultra-long + Hi-C (gold combination)</div></div>
+<div class="dt-node"><span class="dt-q">Q4:</span><div>Want <strong>native methylation detection</strong> without bisulfite? <span class="dt-arrow">→ Yes →</span> ONT (native 5mC, 6mA) or PacBio kinetics</div></div>
+<div class="dt-node"><span class="dt-q">Q5:</span><div>Need <strong>real-time field sequencing</strong> (outbreaks, field studies)? <span class="dt-arrow">→ Yes →</span> ONT MinION (palm-sized, USB-powered)</div></div>
+</div>
+</div>
+
+<div class="callout tip"><span class="callout-icon">🚀</span><div>
+<span data-lang="zh"><strong>2025-2026 趨勢：</strong>越來越多臨床/研究流程採用 <strong>「Illumina + 長讀長」混合策略</strong>——以 Illumina 提供基礎覆蓋，搭配 30× PacBio HiFi 補上 SV 與 phasing。Pangenome（HPRC Release 2，2025-05）也已釋出 200+ 個基於這種策略組裝的 phased haplotypes。</span>
+<span data-lang="en"><strong>2025-2026 trend:</strong> Many clinical/research workflows now use a <strong>hybrid "Illumina + long-read" strategy</strong> — Illumina provides baseline coverage, 30× PacBio HiFi adds SV and phasing. HPRC Release 2 (2025-05) released 200+ phased haplotypes assembled with this strategy.</span>
+</div></div>
+</section>
+
+<!-- ===== Section 6: Code ===== -->
+<section class="section">
+<div class="section-label" data-zh="程式碼" data-en="CODE">程式碼</div>
+<h2 data-zh="FASTQ 操作實作" data-en="Working with FASTQ Files">FASTQ 操作實作</h2>
+<div class="code-tabs">
+<div class="code-tab-btns">
+  <button class="code-tab-btn active" onclick="switchTab(this,'bash1')">Bash</button>
+  <button class="code-tab-btn" onclick="switchTab(this,'py1')">Python</button>
+  <button class="code-tab-btn" onclick="switchTab(this,'r1')">R</button>
+</div>
+<div class="code-tab-content active" id="bash1"><pre><span class="comment"># 計算 FASTQ 中 read 數量 / Count reads in FASTQ</span>
+<span class="func">zcat</span> sample_R1.fastq.gz | <span class="func">wc</span> -l | <span class="func">awk</span> <span class="str">'{print $1/4}'</span>
+
+<span class="comment"># 預覽前 2 條 reads / Preview first 2 reads</span>
+<span class="func">zcat</span> sample_R1.fastq.gz | <span class="func">head</span> -n <span class="num">8</span>
+
+<span class="comment"># 計算平均讀長 / Average read length</span>
+<span class="func">zcat</span> sample_R1.fastq.gz | <span class="func">awk</span> <span class="str">'NR%4==2 {sum+=length($0); n++} END {print sum/n}'</span>
+
+<span class="comment"># 偵測編碼版本（Phred+33 vs +64）/ Detect encoding</span>
+<span class="func">zcat</span> sample_R1.fastq.gz | <span class="func">head</span> -n <span class="num">4000</span> | <span class="func">awk</span> <span class="str">'NR%4==0'</span> | <span class="func">fold</span> -w1 | \
+  <span class="func">awk</span> <span class="str">'{n=length; for(i=1;i&lt;=n;i++) {c=substr($0,i,1); v=int(c); if(v&lt;min || min==0) min=v; if(v&gt;max) max=v}} END {print min,max}'</span>
+<span class="comment"># min &lt; 59 → Phred+33; min &gt;= 64 → Phred+64</span>
+
+<span class="comment"># 配對檢查（R1/R2 順序一致）/ Pair sanity check</span>
+<span class="func">paste</span> &lt;(<span class="func">zcat</span> R1.fq.gz | <span class="func">awk</span> <span class="str">'NR%4==1'</span>) &lt;(<span class="func">zcat</span> R2.fq.gz | <span class="func">awk</span> <span class="str">'NR%4==1'</span>) | <span class="func">head</span></pre></div>
+
+<div class="code-tab-content" id="py1"><pre><span class="comment"># 使用 Biopython / Using Biopython</span>
+<span class="kw">from</span> Bio <span class="kw">import</span> SeqIO
+<span class="kw">import</span> gzip
+
+<span class="comment"># 讀取並計算 Q30 比例 / Compute %Q30</span>
+total, q30 = <span class="num">0</span>, <span class="num">0</span>
+<span class="kw">with</span> gzip.open(<span class="str">"sample_R1.fastq.gz"</span>, <span class="str">"rt"</span>) <span class="kw">as</span> f:
+    <span class="kw">for</span> rec <span class="kw">in</span> SeqIO.parse(f, <span class="str">"fastq"</span>):
+        q = rec.letter_annotations[<span class="str">"phred_quality"</span>]
+        total += <span class="func">len</span>(q)
+        q30   += <span class="func">sum</span>(<span class="num">1</span> <span class="kw">for</span> v <span class="kw">in</span> q <span class="kw">if</span> v &gt;= <span class="num">30</span>)
+<span class="func">print</span>(<span class="str">f"%Q30 = {100*q30/total:.2f}%"</span>)
+
+<span class="comment"># 高效率串流（不解析）/ Streaming without full parse</span>
+<span class="kw">with</span> gzip.open(<span class="str">"sample_R1.fastq.gz"</span>, <span class="str">"rt"</span>) <span class="kw">as</span> f:
+    <span class="kw">for</span> i, line <span class="kw">in</span> <span class="func">enumerate</span>(f):
+        <span class="kw">if</span> i % <span class="num">4</span> == <span class="num">1</span>: <span class="comment"># sequence line</span>
+            <span class="func">print</span>(<span class="func">len</span>(line.strip()))
+        <span class="kw">if</span> i &gt; <span class="num">40</span>: <span class="kw">break</span></pre></div>
+
+<div class="code-tab-content" id="r1"><pre><span class="comment"># ShortRead (Bioconductor)</span>
+<span class="func">library</span>(ShortRead)
+fq &lt;- <span class="func">readFastq</span>(<span class="str">"sample_R1.fastq.gz"</span>)
+<span class="func">length</span>(fq)                   <span class="comment"># read count</span>
+<span class="func">mean</span>(<span class="func">width</span>(fq))             <span class="comment"># mean read length</span>
+
+<span class="comment"># 品質分數矩陣 / Quality score matrix</span>
+qm &lt;- <span class="kw">as</span>(<span class="func">quality</span>(fq), <span class="str">"matrix"</span>)
+<span class="func">summary</span>(<span class="func">rowMeans</span>(qm))      <span class="comment"># per-read mean Q</span>
+
+<span class="comment"># Q30 比例 / %Q30</span>
+<span class="func">mean</span>(qm &gt;= <span class="num">30</span>, na.rm = <span class="kw">TRUE</span>)</pre></div>
+</div>
+</section>
+
+<!-- ===== Section 7: Quiz ===== -->
+<section class="quiz-section">
+<h3>📝 <span data-zh="自我檢測" data-en="Self-Check">自我檢測</span></h3>
+<div class="quiz-q" data-answer="2">
+<p data-lang="zh">1. 你想偵測一段 50 kb 的染色體倒置 (inversion)，最適合的平台是？</p>
+<p data-lang="en">1. You need to detect a 50 kb chromosomal inversion. Best platform?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. Illumina NovaSeq（2×150 bp）</span><span data-lang="en">A. Illumina NovaSeq (2×150 bp)</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. Sanger</span><span data-lang="en">B. Sanger</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. PacBio HiFi 或 ONT 長讀長</span><span data-lang="en">C. PacBio HiFi or ONT long-read</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. RNA-seq</span><span data-lang="en">D. RNA-seq</span></div>
+</div><div class="quiz-feedback" id="fb1"></div></div>
+
+<div class="quiz-q" data-answer="2">
+<p data-lang="zh">2. FASTQ 第四行的 ASCII 字元 'I' (ASCII 73)，在 Phred+33 編碼下對應的品質分數是？</p>
+<p data-lang="en">2. In Phred+33 encoding, the ASCII character 'I' (ASCII 73) corresponds to which quality score?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span>A. Q9</span></div>
+<div class="quiz-opt" data-idx="1"><span>B. Q33</span></div>
+<div class="quiz-opt" data-idx="2"><span>C. Q40</span></div>
+<div class="quiz-opt" data-idx="3"><span>D. Q73</span></div>
+</div><div class="quiz-feedback" id="fb2"></div></div>
+
+<div class="quiz-q" data-answer="1">
+<p data-lang="zh">3. Q30 代表？</p>
+<p data-lang="en">3. What does Q30 mean?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. 90% 準確度（10⁻¹ 錯誤率）</span><span data-lang="en">A. 90% accuracy (10⁻¹ error rate)</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. 99.9% 準確度（10⁻³ 錯誤率）</span><span data-lang="en">B. 99.9% accuracy (10⁻³ error rate)</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. 99.99% 準確度（10⁻⁴ 錯誤率）</span><span data-lang="en">C. 99.99% accuracy (10⁻⁴ error rate)</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. 該位置共有 30 條 reads 覆蓋</span><span data-lang="en">D. The position has 30× read coverage</span></div>
+</div><div class="quiz-feedback" id="fb3"></div></div>
+</section>
+
+<nav class="page-nav">
+<a href="index.html"><span class="nav-dir" data-zh="← 返回首頁" data-en="← Home">← 返回首頁</span><span class="nav-title" data-zh="Genomics Hub" data-en="Genomics Hub">Genomics Hub</span></a>
+<a href="qc.html"><span class="nav-dir" data-zh="下一步 →" data-en="Next →">下一步 →</span><span class="nav-title" data-zh="Step 2: 原始數據品質管控與 Trimming" data-en="Step 2: Raw Data QC &amp; Trimming">Step 2: 原始數據品質管控與 Trimming</span></a>
+</nav>
+</main>
+<footer class="site-footer">© Charlene — Genomics Interactive Tutorial</footer>
+<script src="i18n.js"></script>
+<script>
+window.addEventListener('scroll',()=>{const h=document.documentElement;document.getElementById('progressBar').style.width=(h.scrollTop/(h.scrollHeight-h.clientHeight))*100+'%';});
+function switchTab(b,id){const p=b.closest('.code-tabs');p.querySelectorAll('.code-tab-btn').forEach(x=>x.classList.remove('active'));p.querySelectorAll('.code-tab-content').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.getElementById(id).classList.add('active');}
+
+// Phred chart
+const qs=[];for(let q=2;q<=50;q++)qs.push({x:q,y:Math.pow(10,-q/10)});
+const phredChart=new Chart(document.getElementById('phredChart'),{type:'line',data:{datasets:[{label:'Error probability',data:qs,borderColor:'#1a6b5a',backgroundColor:'rgba(26,107,90,.15)',fill:true,tension:.3,pointRadius:0},{label:'Current Q',data:[{x:30,y:0.001}],borderColor:'#d4a03c',backgroundColor:'#d4a03c',pointRadius:8,pointHoverRadius:10,showLine:false}]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{title:{display:true,text:'Phred Q'},min:0,max:50},y:{type:'logarithmic',title:{display:true,text:'Error probability'},min:1e-5,max:1}}}});
+
+function updatePhred(){const q=+document.getElementById('sliderPhred').value;const p=Math.pow(10,-q/10);const acc=(1-p)*100;const ascii=q+33;const ch=String.fromCharCode(ascii);document.getElementById('valPhred').textContent=q;document.getElementById('phredQ').textContent='Q = '+q;document.getElementById('phredP').textContent='P = '+(p<0.001?p.toExponential(2):p.toFixed(4));document.getElementById('phredA').textContent=acc.toFixed(acc>99.9?3:1)+'% accuracy';document.getElementById('phredAscii').textContent="ASCII '"+ch+"' ("+ascii+")";phredChart.data.datasets[1].data=[{x:q,y:p}];phredChart.update('none');}
+document.getElementById('sliderPhred').addEventListener('input',updatePhred);
+updatePhred();
+
+// Quiz
+const QF={zh:{q1_y:'長讀長能單條跨越倒置兩端，是 SV 偵測首選。',q1_n:'正確答案已標示。',q2_y:'I 的 ASCII = 73，扣除偏移 33 得 Q40，常見於 HiFi。',q2_n:'正確答案已標示。',q3_y:'Q = -10·log10(P)，Q30 = 10^-3 = 0.1% 錯誤率。',q3_n:'正確答案已標示。'},en:{q1_y:'Long reads span both inversion breakpoints — the SV detection gold standard.',q1_n:'Correct answer highlighted.',q2_y:'ASCII 73 - 33 offset = Q40, common in HiFi.',q2_n:'Correct answer highlighted.',q3_y:'Q = -10·log10(P), so Q30 = 10⁻³ = 0.1% error rate.',q3_n:'Correct answer highlighted.'}};
+document.querySelectorAll('.quiz-q').forEach((q,qi)=>{const ans=+q.dataset.answer;q.querySelectorAll('.quiz-opt').forEach(o=>{o.addEventListener('click',()=>{if(q.classList.contains('answered'))return;q.classList.add('answered');const fb=document.getElementById('fb'+(qi+1));const ok=+o.dataset.idx===ans;o.classList.add(ok?'correct':'wrong');if(!ok)q.querySelectorAll('.quiz-opt')[ans].classList.add('correct');const L=I18n.get();fb.className='quiz-feedback show '+(ok?'correct-fb':'wrong-fb');fb.textContent=(ok?'✅ ':'❌ ')+(QF[L]['q'+(qi+1)+'_'+(ok?'y':'n')]||'');});});});
+</script>
+</body></html>

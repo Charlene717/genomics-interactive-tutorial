@@ -1,0 +1,385 @@
+<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Step 11: GWAS — Genomics Tutorial</title>
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+</head><body>
+<nav class="top-nav"><div class="top-nav-inner">
+  <a href="index.html" class="top-nav-brand"><span>🧬</span> <span data-zh="基因體學教學" data-en="Genomics Tutorial">基因體學教學</span></a>
+  <ul class="top-nav-links"><li><a href="sequencing.html">Seq</a></li><li><a href="qc.html">QC</a></li><li><a href="alignment.html">Align</a></li><li><a href="postalign.html">PostAlign</a></li><li><a href="variant-calling.html">VarCall</a></li><li><a href="annotation.html">Annot</a></li><li><a href="sv-cnv.html">SV/CNV</a></li><li><a href="rnaseq.html">RNA-seq</a></li><li><a href="chip-atac.html">ChIP/ATAC</a></li><li><a href="methylation.html">Methyl</a></li><li><a href="gwas.html" class="active">GWAS</a></li><li><a href="popgen.html">PopGen</a></li><li><a href="enrichment.html">Enrich</a></li><li><a href="workflow.html">Pipeline</a></li>
+    <li><a href="references/index.html" data-zh="📚 參考資料" data-en="📚 References">📚 參考資料</a></li>
+  </ul>
+</div></nav>
+<div class="progress-bar-container"><div class="progress-bar" id="progressBar"></div></div>
+<header class="page-hero"><div class="step-badge">STEP 11 / 14</div>
+<h1 data-zh="GWAS 全基因組關聯分析" data-en="GWAS — Genome-Wide Association Study">GWAS 全基因組關聯分析</h1>
+<p class="subtitle" data-lang="zh">在百萬 SNP 上找與性狀關聯的位點——QC、群體分層、imputation、Manhattan plot。</p>
+<p class="subtitle" data-lang="en">Find SNPs associated with traits across millions of variants — QC, stratification, imputation, Manhattan plots.</p>
+</header>
+<main class="content-wrap">
+
+<section class="section">
+<div class="section-label" data-zh="概覽" data-en="OVERVIEW">概覽</div>
+<h2 data-zh="GWAS 在做什麼？" data-en="What does GWAS do?">GWAS 在做什麼？</h2>
+<div data-lang="zh">
+<p>GWAS 在數十萬到百萬位點上分別檢驗：<strong>「該位點的基因型與感興趣性狀（疾病、身高、BMI）是否關聯？」</strong>。輸出的<strong>顯著位點</strong>不代表致病基因，而是「<strong>關聯訊號的座標</strong>」——通常落在非編碼區，需要 fine-mapping 與功能驗證才能找到 causal variant。</p>
+<p>核心流程：基因型 (chip 或 WGS) → QC（樣本 + SNP）→ Imputation → 群體分層校正（PCA）→ 關聯模型（線性/邏輯回歸或 mixed model）→ 多重檢驗校正（5 × 10⁻⁸）→ Manhattan plot + fine-mapping → 功能解讀（eQTL、enhancer 重疊）。</p>
+</div>
+<div data-lang="en">
+<p>GWAS tests millions of variants independently: <strong>"Is genotype at this site associated with the trait of interest (disease, height, BMI)?"</strong>. Significant hits are <strong>not causal genes</strong> but <strong>coordinates of an association signal</strong> — usually non-coding, requiring fine-mapping and functional validation.</p>
+<p>Pipeline: genotypes (chip or WGS) → QC (samples + SNPs) → imputation → population structure correction (PCA) → association model (linear / logistic / mixed model) → multiple testing correction (5 × 10⁻⁸) → Manhattan plot + fine-mapping → functional interpretation (eQTL, enhancer overlap).</p>
+</div>
+<div class="callout tip"><span class="callout-icon">💡</span><div>
+<span data-lang="zh"><strong>核心原則：</strong>顯著閾值 <strong>p &lt; 5 × 10⁻⁸</strong> 是「Bonferroni for ~1M independent tests」的慣例。GWAS hit 多半位於非編碼區——它是 <strong>座標</strong>，不是基因；fine-mapping (SuSiE, FINEMAP) 才告訴你 causal variant。</span>
+<span data-lang="en"><strong>Core principle:</strong> Genome-wide significance <strong>p &lt; 5 × 10⁻⁸</strong> is "Bonferroni for ~1M independent tests". GWAS hits are mostly non-coding — they are <strong>coordinates, not genes</strong>; fine-mapping (SuSiE, FINEMAP) reveals the causal variant.</span>
+</div></div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="QC 步驟" data-en="QC STEPS">QC 步驟</div>
+<h2 data-zh="一、GWAS QC 必做清單" data-en="I. Mandatory GWAS QC Checklist">一、GWAS QC 必做清單</h2>
+<div class="card-grid cols-2">
+<div class="card"><h4>📋 SNP-level QC</h4>
+<div data-lang="zh"><p>• <strong>call rate ≥ 0.95</strong>（missingness ≤ 5%）<br>• <strong>MAF ≥ 0.01</strong>（common variants；rare variant 需另套方法）<br>• <strong>HWE p ≥ 10⁻⁶</strong>（control 中的嚴重 HWE 偏離 = 基因型錯誤訊號）<br>• 移除 strand-ambiguous SNPs（A/T、C/G）若要做 meta-analysis</p></div>
+<div data-lang="en"><p>• <strong>Call rate ≥ 0.95</strong> (missingness ≤ 5%)<br>• <strong>MAF ≥ 0.01</strong> (common variants; rare variants need different methods)<br>• <strong>HWE p ≥ 10⁻⁶</strong> in controls (severe deviation suggests genotyping errors)<br>• Remove strand-ambiguous SNPs (A/T, C/G) for meta-analysis</p></div>
+</div>
+<div class="card"><h4>👥 Sample-level QC</h4>
+<div data-lang="zh"><p>• <strong>call rate ≥ 0.97</strong><br>• <strong>性別檢查</strong>（X 染色體 heterozygosity）<br>• <strong>移除親屬</strong>（KING / PLINK <code>--king-cutoff 0.0884</code>，約 2nd-degree relatives）<br>• <strong>異質性離群</strong>（excess heterozygosity = 樣本污染或汙染）<br>• <strong>ancestry outlier</strong>（與 1000G 做 PCA 找 outlier）</p></div>
+<div data-lang="en"><p>• <strong>Call rate ≥ 0.97</strong><br>• <strong>Sex check</strong> (X-chromosome heterozygosity)<br>• <strong>Remove relatives</strong> (KING / PLINK <code>--king-cutoff 0.0884</code>, ~2nd-degree)<br>• <strong>Heterozygosity outliers</strong> (excess = contamination)<br>• <strong>Ancestry outliers</strong> (PCA with 1000G to flag outliers)</p></div>
+</div>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="互動模擬" data-en="INTERACTIVE">互動模擬</div>
+<h2 data-zh="二、Manhattan Plot 模擬" data-en="II. Manhattan Plot Simulator">二、Manhattan Plot 模擬</h2>
+<div data-lang="zh"><p>Manhattan plot 把 p-value 取 -log10 後沿染色體繪出。GWAS 顯著閾值 5 × 10⁻⁸ ⇒ -log10(p) ≈ 7.3。拖滑桿調整效應量 (effect size) 與樣本數，觀察 power 變化。</p></div>
+<div data-lang="en"><p>Manhattan plot displays -log10(p) along chromosomes. Genome-wide significance 5 × 10⁻⁸ ⇒ -log10(p) ≈ 7.3. Adjust effect size and sample size to see power changes.</p></div>
+
+<div class="interactive-panel">
+<div class="sim-stats">
+  <span class="sim-stat pass" id="numHits">—</span>
+  <span class="sim-stat pass" id="powerShow">—</span>
+</div>
+<div class="slider-group"><label><span data-zh="樣本數 (N)" data-en="Sample size (N)">樣本數</span> <span id="valN">10000</span></label><input type="range" id="slN" min="1000" max="500000" value="10000" step="1000"></div>
+<div class="slider-group"><label><span data-zh="真實 risk variant 數" data-en="True risk loci">真實位點</span> <span id="valHits">5</span></label><input type="range" id="slHits" min="0" max="30" value="5" step="1"></div>
+<div class="slider-group"><label><span data-zh="效應量 β (log-OR per allele)" data-en="Effect β (log-OR per allele)">效應量</span> <span id="valBeta">0.1</span></label><input type="range" id="slBeta" min="0.02" max="0.4" value="0.1" step="0.01"></div>
+<div class="chart-container" style="height:340px"><canvas id="manChart"></canvas></div>
+<p style="font-size:.82rem;color:var(--c-ink-muted);text-align:center;" data-lang="zh">紅線：5 × 10⁻⁸（基因組顯著閾值）| 黃線：1 × 10⁻⁵（suggestive）</p>
+<p style="font-size:.82rem;color:var(--c-ink-muted);text-align:center;" data-lang="en">Red: 5 × 10⁻⁸ (genome-wide) | Yellow: 1 × 10⁻⁵ (suggestive)</p>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="工具" data-en="TOOLS">工具</div>
+<h2 data-zh="三、現代 GWAS 工具" data-en="III. Modern GWAS Tools">三、現代 GWAS 工具</h2>
+<table class="comp-table">
+<thead><tr><th>Tool</th><th data-zh="模型" data-en="Model">模型</th><th data-zh="最適情境" data-en="Best for">最適情境</th></tr></thead>
+<tbody>
+<tr><td><strong>PLINK 2.0</strong></td><td>logistic / linear, --glm</td><td data-lang="zh">QC、PCA、小型–中型 GWAS、quick-look</td><td data-lang="en">QC, PCA, small-mid GWAS, quick-look</td></tr>
+<tr><td><strong>REGENIE</strong></td><td>Whole-genome ridge regression + SPA</td><td data-lang="zh">UK Biobank-scale (n &gt; 100K)、量化與二元性狀；當前最快 GWAS 工具</td><td data-lang="en">UK Biobank scale (n &gt; 100K), quantitative + binary; the fastest GWAS tool today</td></tr>
+<tr><td><strong>SAIGE</strong></td><td>Mixed model + SPA</td><td data-lang="zh">case-control 嚴重不平衡（罕見疾病）、cohort 含親屬</td><td data-lang="en">Highly unbalanced case-control (rare disease), cohorts with relatives</td></tr>
+<tr><td><strong>BOLT-LMM</strong></td><td>Linear mixed model</td><td data-lang="zh">大型量化性狀 GWAS，speed 排第二</td><td data-lang="en">Large quantitative-trait GWAS, second-fastest</td></tr>
+<tr><td><strong>SuSiE / FINEMAP</strong></td><td>Bayesian fine-mapping</td><td data-lang="zh">顯著位點的 credible set 推斷</td><td data-lang="en">Credible-set inference at significant loci</td></tr>
+</tbody></table>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="進階主題" data-en="ADVANCED">進階主題</div>
+<h2 data-zh="四、Imputation、PRS 與 Mendelian Randomization" data-en="IV. Imputation, PRS, and Mendelian Randomization">四、Imputation、PRS 與 Mendelian Randomization</h2>
+<div class="card-grid cols-2">
+<div class="card"><h4>🔮 Genotype Imputation</h4>
+<div data-lang="zh"><p>用 reference panel（TOPMed、HRC、1000G）填補晶片未覆蓋的 SNP。<strong>邏輯：</strong>LD 區段的 phased haplotype 可從 reference 推斷。<strong>工具：</strong>Michigan Imputation Server、TOPMed Imputation Server（線上免費）；本地用 Minimac4 / IMPUTE5。<strong>產出：</strong>~50M imputed SNPs（每位點附 INFO score；INFO ≥ 0.7 通常保留）。</p></div>
+<div data-lang="en"><p>Use a reference panel (TOPMed, HRC, 1000G) to fill in SNPs not on the chip. <strong>Logic:</strong> phased haplotypes within LD blocks can be inferred from the reference. <strong>Tools:</strong> Michigan Imputation Server, TOPMed Imputation Server (online, free); locally Minimac4 / IMPUTE5. <strong>Output:</strong> ~50M imputed SNPs with INFO scores (typically keep INFO ≥ 0.7).</p></div>
+</div>
+<div class="card"><h4>🎯 Polygenic Risk Score (PRS)</h4>
+<div data-lang="zh"><p>把 GWAS summary statistics 在新個體上加權求和，得到該性狀的「遺傳負擔」分數。<strong>方法：</strong>P+T (clumping + threshold)、PRS-CS (continuous shrinkage)、LDpred2、SBayesR。<strong>注意：</strong>跨族裔 portability 仍是大問題——歐裔訓練的 PRS 在非歐裔的解釋力會降 50–70%。</p></div>
+<div data-lang="en"><p>Weighted sum of GWAS summary stats applied to a new individual, yielding a "genetic burden" score. <strong>Methods:</strong> P+T (clumping + threshold), PRS-CS, LDpred2, SBayesR. <strong>Caveat:</strong> cross-ancestry portability remains a major issue — PRS trained on European populations loses 50–70% explanatory power in non-European groups.</p></div>
+</div>
+<div class="card"><h4>🧪 Mendelian Randomization (MR)</h4>
+<div data-lang="zh"><p>把 GWAS 顯著 SNP 當「natural randomization」工具變數，推斷暴露 → 疾病的<strong>因果</strong>效應。<strong>主流方法：</strong>IVW、MR-Egger、Weighted Median、MR-PRESSO（移除 pleiotropic outlier）。<strong>工具：</strong>TwoSampleMR (R)、MendelianRandomization。</p></div>
+<div data-lang="en"><p>Treats GWAS-significant SNPs as "natural randomization" instrument variables to infer <strong>causal</strong> effects of exposure → disease. <strong>Methods:</strong> IVW, MR-Egger, Weighted Median, MR-PRESSO (removes pleiotropic outliers). <strong>Tools:</strong> TwoSampleMR (R), MendelianRandomization.</p></div>
+</div>
+<div class="card"><h4>🔗 Colocalization & QTL</h4>
+<div data-lang="zh"><p>判斷 GWAS 訊號是否與 eQTL / sQTL 共享因果變異。<strong>工具：</strong>coloc、SuSiE-coloc、HyPrColoc。<strong>典型用法：</strong>用 GTEx v9 (838 donors, 54 tissues, 2024) 中對應組織的 eQTL 與 GWAS 比對。</p></div>
+<div data-lang="en"><p>Tests whether a GWAS signal shares a causal variant with eQTL / sQTL. <strong>Tools:</strong> coloc, SuSiE-coloc, HyPrColoc. <strong>Typical use:</strong> compare against GTEx v9 (838 donors, 54 tissues, 2024) eQTLs from matching tissue.</p></div>
+</div>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="決策引導" data-en="DECISION GUIDE">決策引導</div>
+<h2 data-zh="五、GWAS 流程決策" data-en="V. GWAS Pipeline Decisions">五、GWAS 流程決策</h2>
+<div class="decision-tree">
+<h4>🌳 <span data-zh="工具選擇" data-en="Tool Choice">工具選擇</span></h4>
+<div data-lang="zh">
+<div class="dt-node"><span class="dt-q">Q1:</span><div>n &lt; 10K，沒有親屬？<span class="dt-arrow">→ 是 →</span> <strong>PLINK 2.0 --glm</strong>（最直觀）</div></div>
+<div class="dt-node"><span class="dt-q">Q2:</span><div>n &gt; 50K 量化性狀（BMI、身高）？<span class="dt-arrow">→ 是 →</span> <strong>REGENIE</strong> 或 <strong>BOLT-LMM</strong></div></div>
+<div class="dt-node"><span class="dt-q">Q3:</span><div>case-control 非常不平衡（1:100+）或 rare disease？<span class="dt-arrow">→ 是 →</span> <strong>SAIGE</strong>（saddle point approximation 是必須）</div></div>
+<div class="dt-node"><span class="dt-q">Q4:</span><div>cohort 含親屬或顯著 cryptic relatedness？<span class="dt-arrow">→ 是 →</span> <strong>SAIGE</strong> 或 <strong>BOLT-LMM</strong>（mixed model）</div></div>
+<div class="dt-node"><span class="dt-q">Q5:</span><div>有 GWAS hits，要做下游 fine-mapping？<span class="dt-arrow">→ 是 →</span> <strong>SuSiE</strong> (R) 或 FINEMAP → coloc → MR</div></div>
+</div>
+<div data-lang="en">
+<div class="dt-node"><span class="dt-q">Q1:</span><div>n &lt; 10K, no relatives? <span class="dt-arrow">→ Yes →</span> <strong>PLINK 2.0 --glm</strong> (most direct)</div></div>
+<div class="dt-node"><span class="dt-q">Q2:</span><div>n &gt; 50K quantitative trait (BMI, height)? <span class="dt-arrow">→ Yes →</span> <strong>REGENIE</strong> or <strong>BOLT-LMM</strong></div></div>
+<div class="dt-node"><span class="dt-q">Q3:</span><div>Highly unbalanced case-control (1:100+) or rare disease? <span class="dt-arrow">→ Yes →</span> <strong>SAIGE</strong> (saddle point approximation mandatory)</div></div>
+<div class="dt-node"><span class="dt-q">Q4:</span><div>Cohort with relatives or cryptic relatedness? <span class="dt-arrow">→ Yes →</span> <strong>SAIGE</strong> or <strong>BOLT-LMM</strong> (mixed model)</div></div>
+<div class="dt-node"><span class="dt-q">Q5:</span><div>Have GWAS hits, want fine-mapping? <span class="dt-arrow">→ Yes →</span> <strong>SuSiE</strong> (R) or FINEMAP → coloc → MR</div></div>
+</div>
+</div>
+
+<div class="callout warn"><span class="callout-icon">⚠️</span><div>
+<span data-lang="zh"><strong>陷阱：</strong>① λ_GC &gt; 1.1 警示嚴重 population stratification — 重新做 PCA + 加更多 PC；② 不要把多個族裔 pool 在同一 GWAS — 用 within-ancestry GWAS + meta-analysis (METAL)；③ 不要把 GWAS hit 直接當「致病基因」報導 — 多數是非編碼，需要 fine-mapping & functional 驗證。</span>
+<span data-lang="en"><strong>Pitfalls:</strong> ① λ_GC &gt; 1.1 signals serious population stratification — redo PCA + add more PCs; ② Don't pool multiple ancestries in one GWAS — use within-ancestry GWAS + meta-analysis (METAL); ③ Don't report GWAS hits as "causal genes" — most are non-coding and require fine-mapping + functional validation.</span>
+</div></div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="程式碼" data-en="CODE">程式碼</div>
+<h2 data-zh="GWAS 完整流程" data-en="Full GWAS Pipeline">GWAS 完整流程</h2>
+<div class="code-tabs">
+<div class="code-tab-btns">
+  <button class="code-tab-btn active" onclick="switchTab(this,'b1')">Bash (PLINK)</button>
+  <button class="code-tab-btn" onclick="switchTab(this,'b2')">Bash (REGENIE)</button>
+  <button class="code-tab-btn" onclick="switchTab(this,'r1')">R (qqman / SuSiE)</button>
+  <button class="code-tab-btn" onclick="switchTab(this,'p1')">Python (scikit-allel)</button>
+</div>
+<div class="code-tab-content active" id="b1"><pre><span class="comment"># --- PLINK 2.0 完整 QC + GWAS ---</span>
+<span class="comment"># 1) SNP-level QC</span>
+plink2 --bfile raw \
+   --maf <span class="num">0.01</span> --geno <span class="num">0.05</span> --hwe <span class="num">1e-6</span> \
+   --make-bed --out qc1
+
+<span class="comment"># 2) Sample-level QC</span>
+plink2 --bfile qc1 \
+   --mind <span class="num">0.03</span> --king-cutoff <span class="num">0.0884</span> \
+   --make-bed --out qc2
+
+<span class="comment"># 3) PCA（先 LD prune）</span>
+plink2 --bfile qc2 --indep-pairwise <span class="num">50</span> <span class="num">5</span> <span class="num">0.2</span> --out prune
+plink2 --bfile qc2 --extract prune.prune.in --pca <span class="num">10</span> --out pca
+
+<span class="comment"># 4) 關聯分析（含 PC 校正）</span>
+plink2 --bfile qc2 \
+   --pheno phenotype.txt --pheno-name disease \
+   --covar pca.eigenvec --covar-name PC1-PC10,age,sex \
+   --glm hide-covar \
+   --out gwas
+
+<span class="comment"># 5) 看顯著位點</span>
+<span class="func">awk</span> <span class="str">'$13 &lt; 5e-8'</span> gwas.disease.glm.logistic | <span class="func">head</span></pre></div>
+
+<div class="code-tab-content" id="b2"><pre><span class="comment"># --- REGENIE (UK Biobank-scale) ---</span>
+<span class="comment"># Step 1: whole-genome ridge regression on a LD-pruned subset</span>
+regenie \
+   --step <span class="num">1</span> \
+   --bed qc2 \
+   --extract prune.prune.in \
+   --phenoFile pheno.txt --phenoCol disease \
+   --covarFile covar.txt --covarColList PC1-PC10,age,sex \
+   --bsize <span class="num">1000</span> \
+   --bt --out step1
+
+<span class="comment"># Step 2: SNP-by-SNP test using step 1 predictions</span>
+regenie \
+   --step <span class="num">2</span> \
+   --bgen imputed.bgen --sample imputed.sample \
+   --phenoFile pheno.txt --phenoCol disease \
+   --covarFile covar.txt --covarColList PC1-PC10,age,sex \
+   --bt --firth --approx \
+   --pred step1_pred.list \
+   --bsize <span class="num">400</span> \
+   --out gwas
+
+<span class="comment"># Meta-analysis with METAL</span>
+metal &lt;&lt; EOF
+SCHEME STDERR
+MARKER SNP
+WEIGHT N
+ALLELE A1 A2
+EFFECT BETA
+STDERR SE
+PVAL P
+PROCESS study1.txt
+PROCESS study2.txt
+ANALYZE HETEROGENEITY
+EOF</pre></div>
+
+<div class="code-tab-content" id="r1"><pre><span class="comment"># --- R: 視覺化 + fine-mapping ---</span>
+<span class="func">library</span>(qqman); <span class="func">library</span>(susieR); <span class="func">library</span>(data.table)
+
+gwas &lt;- <span class="func">fread</span>(<span class="str">"gwas.tsv"</span>)
+<span class="comment"># Manhattan</span>
+<span class="func">manhattan</span>(gwas, chr=<span class="str">"CHR"</span>, bp=<span class="str">"BP"</span>, snp=<span class="str">"SNP"</span>, p=<span class="str">"P"</span>,
+          genomewideline = -<span class="func">log10</span>(<span class="num">5e-8</span>),
+          suggestiveline = -<span class="func">log10</span>(<span class="num">1e-5</span>))
+<span class="comment"># QQ plot</span>
+<span class="func">qq</span>(gwas$P)
+<span class="comment"># λ_GC (genomic inflation)</span>
+chisq &lt;- <span class="func">qchisq</span>(<span class="num">1</span> - gwas$P, df = <span class="num">1</span>)
+lambda &lt;- <span class="func">median</span>(chisq) / <span class="func">qchisq</span>(<span class="num">0.5</span>, df = <span class="num">1</span>)
+<span class="func">cat</span>(<span class="str">"λ_GC ="</span>, <span class="func">round</span>(lambda, <span class="num">3</span>), <span class="str">"\n"</span>)
+
+<span class="comment"># SuSiE fine-mapping (給定 region z-scores 與 LD 矩陣)</span>
+fit &lt;- <span class="func">susie_rss</span>(z = z_scores, R = LD_matrix, L = <span class="num">10</span>)
+<span class="func">susie_get_cs</span>(fit)   <span class="comment"># 95% credible sets</span></pre></div>
+
+<div class="code-tab-content" id="p1"><pre><span class="comment"># scikit-allel 簡易 GWAS / Quick GWAS with scikit-allel</span>
+<span class="kw">import</span> allel
+<span class="kw">import</span> numpy <span class="kw">as</span> np
+<span class="kw">from</span> scipy <span class="kw">import</span> stats
+
+callset = allel.read_vcf(<span class="str">"cohort.vcf.gz"</span>, fields=[<span class="str">"variants/CHROM"</span>,<span class="str">"variants/POS"</span>,<span class="str">"variants/REF"</span>,<span class="str">"variants/ALT"</span>,<span class="str">"calldata/GT"</span>])
+gt = allel.GenotypeArray(callset[<span class="str">"calldata/GT"</span>])
+ac = gt.count_alleles()
+maf = np.minimum(ac[:, <span class="num">0</span>], ac[:, <span class="num">1</span>]) / ac.sum(axis=<span class="num">1</span>)
+
+<span class="comment"># 過濾 + 轉成 dosage (additive)</span>
+keep = (maf &gt;= <span class="num">0.01</span>) &amp; (ac.sum(axis=<span class="num">1</span>) &gt; <span class="num">0</span>)
+gn = gt.to_n_alt()[keep]  <span class="comment"># N_variants × N_samples (0/1/2)</span>
+
+<span class="comment"># 對每 SNP 做 logistic regression with PCs</span>
+y = phenotypes[<span class="str">"disease"</span>].values
+X_cov = phenotypes[[<span class="str">"PC1"</span>,<span class="str">"PC2"</span>,<span class="str">"PC3"</span>,<span class="str">"age"</span>,<span class="str">"sex"</span>]].values
+<span class="kw">from</span> sklearn.linear_model <span class="kw">import</span> LogisticRegression
+pvals = []
+<span class="kw">for</span> i <span class="kw">in</span> <span class="func">range</span>(gn.shape[<span class="num">0</span>]):
+    X = np.column_stack([gn[i], X_cov])
+    <span class="comment"># Use statsmodels for proper p-values:</span>
+    <span class="kw">import</span> statsmodels.api <span class="kw">as</span> sm
+    res = sm.Logit(y, sm.add_constant(X)).fit(disp=<span class="num">0</span>)
+    pvals.append(res.pvalues[<span class="num">1</span>])
+pvals = np.array(pvals)
+<span class="func">print</span>(<span class="str">f"Hits at 5e-8: {(pvals &lt; 5e-8).sum()}"</span>)</pre></div>
+</div>
+</section>
+
+<section class="quiz-section">
+<h3>📝 <span data-zh="自我檢測" data-en="Self-Check">自我檢測</span></h3>
+<div class="quiz-q" data-answer="2">
+<p data-lang="zh">1. GWAS 顯著閾值 p &lt; 5 × 10⁻⁸ 的依據是？</p>
+<p data-lang="en">1. Where does the GWAS threshold p &lt; 5 × 10⁻⁸ come from?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. 任意傳統</span><span data-lang="en">A. Arbitrary convention</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. 對應 0.05 / 樣本數</span><span data-lang="en">B. 0.05 / sample size</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. Bonferroni 校正 ~ 1M 獨立檢驗 (0.05 / 10⁶)</span><span data-lang="en">C. Bonferroni for ~1M independent tests (0.05 / 10⁶)</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. Chi-square 分佈</span><span data-lang="en">D. From chi-square distribution</span></div>
+</div><div class="quiz-feedback" id="fb1"></div></div>
+
+<div class="quiz-q" data-answer="2">
+<p data-lang="zh">2. 為什麼 GWAS 必須校正 population stratification？</p>
+<p data-lang="en">2. Why must GWAS correct for population stratification?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. 提高樣本數</span><span data-lang="en">A. To boost sample size</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. 降低 imputation 錯誤</span><span data-lang="en">B. To reduce imputation errors</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. 族群結構與性狀相關性會產生大量假陽性</span><span data-lang="en">C. Ancestry correlates with traits, producing massive false positives</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. 為了符合 HWE</span><span data-lang="en">D. To enforce HWE</span></div>
+</div><div class="quiz-feedback" id="fb2"></div></div>
+
+<div class="quiz-q" data-answer="1">
+<p data-lang="zh">3. 為什麼歐裔訓練的 PRS 在非歐裔表現較差？</p>
+<p data-lang="en">3. Why do European-trained PRSs perform worse in non-European groups?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. 因為非歐裔基因不同</span><span data-lang="en">A. Non-European genetics is different</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. LD 結構與 allele frequency 跨族裔差異，使 marker SNPs 對 causal 變異的標記強度改變</span><span data-lang="en">B. LD structure and allele frequencies differ across ancestries, weakening proxy SNPs' tagging of causal variants</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. PRS 演算法有問題</span><span data-lang="en">C. PRS algorithm is flawed</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. 非歐裔樣本太少</span><span data-lang="en">D. Non-European samples are too few</span></div>
+</div><div class="quiz-feedback" id="fb3"></div></div>
+</section>
+
+<nav class="page-nav">
+<a href="methylation.html"><span class="nav-dir" data-zh="← 上一步" data-en="← Previous">← 上一步</span><span class="nav-title" data-zh="Step 10: DNA 甲基化與表觀基因體" data-en="Step 10: DNA Methylation &amp; Epigenomics">Step 10: DNA 甲基化與表觀基因體</span></a>
+<a href="popgen.html"><span class="nav-dir" data-zh="下一步 →" data-en="Next →">下一步 →</span><span class="nav-title" data-zh="Step 12: 群體遺傳學" data-en="Step 12: Population Genetics">Step 12: 群體遺傳學</span></a>
+</nav>
+</main>
+<footer class="site-footer">© Charlene — Genomics Interactive Tutorial</footer>
+<script src="i18n.js"></script>
+<script>
+window.addEventListener('scroll',()=>{const h=document.documentElement;document.getElementById('progressBar').style.width=(h.scrollTop/(h.scrollHeight-h.clientHeight))*100+'%';});
+function switchTab(b,id){const p=b.closest('.code-tabs');p.querySelectorAll('.code-tab-btn').forEach(x=>x.classList.remove('active'));p.querySelectorAll('.code-tab-content').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.getElementById(id).classList.add('active');}
+
+// Manhattan plot simulation
+const chrColors=['#1a6b5a','#0e4a3e','#2d8b6e','#3a9a7c'];
+const totalSNPs=8000;
+function randn(){let u=0,v=0;while(u===0)u=Math.random();while(v===0)v=Math.random();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+
+const manChart=new Chart(document.getElementById('manChart'),{type:'scatter',data:{datasets:[
+  {label:'Chr (even)',data:[],backgroundColor:'rgba(26,107,90,.5)'},
+  {label:'Chr (odd)',data:[],backgroundColor:'rgba(120,160,140,.5)'},
+  {label:'Significant',data:[],backgroundColor:'rgba(192,57,43,.85)'},
+  {label:'5e-8 line',data:[{x:0,y:7.301},{x:totalSNPs,y:7.301}],borderColor:'#c0392b',borderWidth:1.5,showLine:true,pointRadius:0,fill:false,borderDash:[5,3]},
+  {label:'1e-5 line',data:[{x:0,y:5},{x:totalSNPs,y:5}],borderColor:'#d4a03c',borderWidth:1,showLine:true,pointRadius:0,fill:false,borderDash:[3,3]}
+]},options:{responsive:true,maintainAspectRatio:false,animation:false,scales:{x:{title:{display:true,text:'Genomic position (SNP index)'},min:0,max:totalSNPs},y:{title:{display:true,text:'-log10(p)'},min:0,max:18}},plugins:{legend:{display:false}}}});
+
+function updateMan(){
+  const N=+document.getElementById('slN').value;
+  const nHits=+document.getElementById('slHits').value;
+  const beta=+document.getElementById('slBeta').value;
+  document.getElementById('valN').textContent=N;
+  document.getElementById('valHits').textContent=nHits;
+  document.getElementById('valBeta').textContent=beta.toFixed(2);
+  // generate background SNPs (null): -log10(p) ~ standard
+  const even=[], odd=[], sig=[];
+  // 22 chromosomes, evenly distributed
+  const snpsPerChr = totalSNPs/22;
+  // Place true hits at random chromosomes (cluster of LD)
+  const hitPositions=[];
+  for(let i=0;i<nHits;i++){
+    const chr = 1 + Math.floor(Math.random()*22);
+    const pos = (chr-1)*snpsPerChr + Math.random()*snpsPerChr;
+    hitPositions.push(Math.round(pos));
+  }
+  // Power calculation: chi-square noncentrality lambda = N * 2 * MAF * (1-MAF) * beta^2
+  // For typical MAF=0.2 and beta=0.1, N=10000: lambda = 10000*2*0.2*0.8*0.01 = 32 → very strong
+  // Convert to expected -log10(p): use chi-square 1df with NCP=lambda
+  const maf=0.2;
+  const NCP = N * 2 * maf * (1-maf) * beta * beta;
+  for(let i=0;i<totalSNPs;i++){
+    const chr = 1 + Math.floor(i/snpsPerChr);
+    // Check if this is a hit (or close to one — simulate LD halo)
+    let isHit = false, ncpHere=0;
+    for(const hp of hitPositions){
+      const dist = Math.abs(i - hp);
+      if(dist<10){
+        isHit = true;
+        ncpHere = NCP * Math.exp(-dist*dist/30);
+        break;
+      }
+    }
+    let neglogp;
+    if(isHit){
+      // chi-square 1df with NCP=ncpHere, observed value ~ random sample
+      // Approximate: chi-square value = (Z+sqrt(NCP))^2 where Z ~ N(0,1)
+      const z = randn() + Math.sqrt(ncpHere);
+      const chisq = z*z;
+      // -log10(p) for chi-square 1df = -log10(1-pchisq(chisq,1))
+      // Approximation: for chisq > 20, -log10(p) ≈ chisq/(2*log(10)) + ...
+      // Use: -log10(p) ≈ 0.5 * chisq / log(10) for high chisq
+      neglogp = Math.max(0, 0.434 * chisq - 0.5);
+    } else {
+      // Null: -log10(p) ~ Exponential(rate=log(10)) basically, generate uniform p
+      const u = Math.random();
+      neglogp = -Math.log10(u);
+    }
+    const pt={x:i, y:Math.min(18, neglogp)};
+    if(neglogp >= 7.301) sig.push(pt);
+    else if(chr%2===0) even.push(pt);
+    else odd.push(pt);
+  }
+  manChart.data.datasets[0].data=even;
+  manChart.data.datasets[1].data=odd;
+  manChart.data.datasets[2].data=sig;
+  manChart.update('none');
+  const L=I18n.get();
+  document.getElementById('numHits').textContent=(L==='zh'?'顯著位點: ':'Hits: ')+sig.length;
+  // Power estimate for the simulated effect
+  const power = 100 * Math.min(1, Math.max(0, (NCP-29)/30 + 0.3));
+  document.getElementById('powerShow').textContent=(L==='zh'?'Power ≈ ':'Power ≈ ')+power.toFixed(0)+'%';
+}
+['slN','slHits','slBeta'].forEach(id=>document.getElementById(id).addEventListener('input',updateMan));
+document.addEventListener('langchange',updateMan);
+updateMan();
+
+const QF={zh:{q1_y:'GWAS 慣例使用 5e-8 = 0.05 / 10⁶（人類基因組約 100 萬個獨立 LD 區段）。',q1_n:'正確答案已標示。',q2_y:'若 case 與 control 的祖先比例不同，與 ancestry 共變的 SNP 會被誤判為與疾病關聯。',q2_n:'正確答案已標示。',q3_y:'PRS 用的多半是 tag SNP 而非 causal，跨族裔 LD 結構不同會「鬆綁」tag SNP 與 causal 的關聯。',q3_n:'正確答案已標示。'},en:{q1_y:'GWAS convention uses 5e-8 = 0.05 / 10⁶, the approximate number of independent LD blocks in the human genome.',q1_n:'Correct answer highlighted.',q2_y:'If case and control ancestry proportions differ, any SNP that varies by ancestry can falsely appear associated.',q2_n:'Correct answer highlighted.',q3_y:'PRS uses tag SNPs (not causal). Different LD structure across ancestries breaks the tag-to-causal correlation.',q3_n:'Correct answer highlighted.'}};
+document.querySelectorAll('.quiz-q').forEach((q,qi)=>{const ans=+q.dataset.answer;q.querySelectorAll('.quiz-opt').forEach(o=>{o.addEventListener('click',()=>{if(q.classList.contains('answered'))return;q.classList.add('answered');const fb=document.getElementById('fb'+(qi+1));const ok=+o.dataset.idx===ans;o.classList.add(ok?'correct':'wrong');if(!ok)q.querySelectorAll('.quiz-opt')[ans].classList.add('correct');const L=I18n.get();fb.className='quiz-feedback show '+(ok?'correct-fb':'wrong-fb');fb.textContent=(ok?'✅ ':'❌ ')+(QF[L]['q'+(qi+1)+'_'+(ok?'y':'n')]||'');});});});
+</script>
+</body></html>

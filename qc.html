@@ -1,0 +1,335 @@
+<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Step 2: QC & Trimming — Genomics Tutorial</title>
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+</head><body>
+<nav class="top-nav"><div class="top-nav-inner">
+  <a href="index.html" class="top-nav-brand"><span>🧬</span> <span data-zh="基因體學教學" data-en="Genomics Tutorial">基因體學教學</span></a>
+  <ul class="top-nav-links"><li><a href="sequencing.html">Seq</a></li><li><a href="qc.html" class="active">QC</a></li><li><a href="alignment.html">Align</a></li><li><a href="postalign.html">PostAlign</a></li><li><a href="variant-calling.html">VarCall</a></li><li><a href="annotation.html">Annot</a></li><li><a href="sv-cnv.html">SV/CNV</a></li><li><a href="rnaseq.html">RNA-seq</a></li><li><a href="chip-atac.html">ChIP/ATAC</a></li><li><a href="methylation.html">Methyl</a></li><li><a href="gwas.html">GWAS</a></li><li><a href="popgen.html">PopGen</a></li><li><a href="enrichment.html">Enrich</a></li><li><a href="workflow.html">Pipeline</a></li>
+    <li><a href="references/index.html" data-zh="📚 參考資料" data-en="📚 References">📚 參考資料</a></li>
+  </ul>
+</div></nav>
+<div class="progress-bar-container"><div class="progress-bar" id="progressBar"></div></div>
+<header class="page-hero"><div class="step-badge">STEP 2 / 14</div>
+<h1 data-zh="原始數據品質管控與 Trimming" data-en="Raw Data QC & Trimming">原始數據品質管控與 Trimming</h1>
+<p class="subtitle" data-lang="zh">用 FastQC、MultiQC、fastp 把髒污從 FASTQ 裡篩掉，再進入下游分析。</p>
+<p class="subtitle" data-lang="en">Use FastQC, MultiQC, and fastp to clean noise out of FASTQ before any downstream step.</p>
+</header>
+<main class="content-wrap">
+
+<section class="section">
+<div class="section-label" data-zh="概覽" data-en="OVERVIEW">概覽</div>
+<h2 data-zh="為什麼 QC 不只是「跑一下 FastQC」？" data-en="QC is more than running FastQC">為什麼 QC 不只是「跑一下 FastQC」？</h2>
+<div data-lang="zh">
+<p>原始 FASTQ 經常帶有：<strong>定序儀末端品質衰減</strong>（後段鹼基 Q 值掉到 20 以下）、<strong>adapter 殘留</strong>（read 長過插入片段時露出 adapter）、<strong>polyG 偽訊號</strong>（NovaSeq / NextSeq 雙色化學特有）、<strong>過度表達序列</strong>（rRNA、PCR duplicate 雛形）、<strong>tile 失敗</strong>、<strong>污染物種</strong>等問題。</p>
+<p>這些雜訊不處理會讓 alignment 軟錯（soft-clip 暴增）、SNV/Indel false positive 增加、RNA-seq 計數偏誤。<strong>QC + Trimming 是性價比最高的清潔步驟</strong>——花十分鐘可省下後面幾天的痛苦。</p>
+</div>
+<div data-lang="en">
+<p>Raw FASTQ commonly suffers from: <strong>3' quality decay</strong> (Q drops below 20 in late cycles), <strong>adapter readthrough</strong> (when insert is shorter than read length), <strong>polyG artifacts</strong> (specific to NovaSeq/NextSeq 2-color chemistry), <strong>overrepresented sequences</strong> (rRNA, PCR duplicate seeds), <strong>tile failures</strong>, and <strong>contaminating species</strong>.</p>
+<p>Left untreated, these inflate soft-clipping in alignment, raise SNV/Indel false-positive rates, and bias RNA-seq counts. <strong>QC + Trimming is the single highest-ROI cleanup step</strong> — ten minutes saved here prevent days of pain later.</p>
+</div>
+<div class="callout tip"><span class="callout-icon">💡</span><div>
+<span data-lang="zh"><strong>核心原則：</strong>不要 over-trim！過嚴會把短 read 砍光，造成 paired 失配與 SV breakpoint reads 流失。<strong>Q20 floor + adapter removal</strong> 是大多數情境的良好預設。</span>
+<span data-lang="en"><strong>Core principle:</strong> Don't over-trim! Aggressive cutoffs destroy short reads, break pairs, and remove SV breakpoint evidence. <strong>Q20 floor + adapter removal</strong> is a sensible default for most workflows.</span>
+</div></div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="核心指標" data-en="CORE METRICS">核心指標</div>
+<h2 data-zh="一、FastQC 必看的六大模組" data-en="I. Six FastQC Modules You Must Read">一、FastQC 必看的六大模組</h2>
+<div class="card-grid cols-2">
+<div class="card"><div class="card-icon">📉</div><h4>Per base sequence quality</h4>
+<div data-lang="zh"><p>箱型圖顯示每個鹼基位置（cycle）的 Phred 分數分佈。<strong>正常：</strong>前段 Q35+，到 read 尾端逐漸下降。<strong>警示：</strong>中位數掉到 Q20 以下；尤其 R2 通常比 R1 衰減更快（Illumina paired-end 化學特性）。</p></div>
+<div data-lang="en"><p>Boxplot of Phred score per cycle. <strong>Healthy:</strong> Q35+ early, gradual decline at 3' end. <strong>Warning:</strong> median below Q20; especially R2, which decays faster than R1 (chemistry artifact of Illumina paired-end).</p></div>
+</div>
+<div class="card"><div class="card-icon">🅶</div><h4>Per base sequence content</h4>
+<div data-lang="zh"><p>每個 cycle 上 A/T/G/C 比例。<strong>正常：</strong>四條線平行（隨機文庫）。<strong>警示：</strong>RNA-seq 前 10–12 cycle 常因 random hexamer priming 出現偏誤——可接受但要記住；polyG 尾端則需特別處理。</p></div>
+<div data-lang="en"><p>A/T/G/C proportion per cycle. <strong>Healthy:</strong> four parallel lines (random library). <strong>Warning:</strong> RNA-seq often shows bias in cycles 1–12 due to random hexamer priming — acceptable but worth noting; polyG tails need special handling.</p></div>
+</div>
+<div class="card"><div class="card-icon">📊</div><h4>Per sequence GC content</h4>
+<div data-lang="zh"><p>所有 read 的 GC% 分佈。<strong>正常：</strong>單峰且接近物種基因組 GC%（人類 ~41%）。<strong>警示：</strong>雙峰可能代表物種污染；偏離預期 GC 可能是 amplification bias 或 rRNA 污染。</p></div>
+<div data-lang="en"><p>Distribution of per-read GC%. <strong>Healthy:</strong> single peak near the species GC% (human ~41%). <strong>Warning:</strong> bimodal peaks may indicate contamination; deviation from expected GC suggests amplification bias or rRNA contamination.</p></div>
+</div>
+<div class="card"><div class="card-icon">🪞</div><h4>Sequence duplication levels</h4>
+<div data-lang="zh"><p>重複出現的 unique sequence 比例。RNA-seq、ChIP-seq <strong>預期較高</strong>（高表現基因 / peak 區）；WGS 中若 &gt;30% duplicate 通常代表 PCR over-amplification 或 input DNA 不足。</p></div>
+<div data-lang="en"><p>Fraction of duplicated unique sequences. RNA-seq and ChIP-seq <strong>expect higher</strong> values (highly expressed genes / peak regions); &gt;30% duplicates in WGS usually means PCR over-amplification or insufficient input DNA.</p></div>
+</div>
+<div class="card"><div class="card-icon">🧷</div><h4>Adapter content</h4>
+<div data-lang="zh"><p>cycle 軸上 adapter 序列累積比例。<strong>read 長 &gt; insert size</strong> 時，3' 端會讀進 adapter；用 Trimmomatic / fastp / Trim Galore 切除。短 insert（cell-free DNA、microRNA）尤其需要。</p></div>
+<div data-lang="en"><p>Cumulative adapter content per cycle. When <strong>read length &gt; insert size</strong>, the 3' end reads into adapter; remove with Trimmomatic / fastp / Trim Galore. Especially important for short inserts (cfDNA, microRNA).</p></div>
+</div>
+<div class="card"><div class="card-icon">🔁</div><h4>Overrepresented sequences</h4>
+<div data-lang="zh"><p>頻率異常高的特定序列。<strong>常見來源：</strong>未切除的 adapter、rRNA（28S/18S）、PhiX 對照、宿主物種污染。可 BLAST 該序列確認來源。</p></div>
+<div data-lang="en"><p>Specific sequences with abnormally high frequency. <strong>Common sources:</strong> uncut adapters, rRNA (28S/18S), PhiX spike-in, host contamination. BLAST the sequence to identify the source.</p></div>
+</div>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="互動模擬" data-en="INTERACTIVE">互動模擬</div>
+<h2 data-zh="二、Trimming 影響模擬器" data-en="II. Trimming Impact Simulator">二、Trimming 影響模擬器</h2>
+<div data-lang="zh"><p>拖動滑桿觀察品質閾值與最短讀長如何影響 reads 保留率。實際數據中，<strong>過嚴閾值會在保留率上付出代價</strong>——尋找品質與資料量的甜蜜點。</p></div>
+<div data-lang="en"><p>Drag sliders to see how quality threshold and minimum length affect read retention. With real data, <strong>aggressive cutoffs trade retention for cleanliness</strong> — find the sweet spot.</p></div>
+
+<div class="interactive-panel">
+<div class="sim-stats">
+  <span class="sim-stat pass" id="trimKept">—</span>
+  <span class="sim-stat fail" id="trimDropped">—</span>
+  <span class="sim-stat pass" id="trimMeanLen">—</span>
+</div>
+<div class="slider-group"><label><span data-zh="品質閾值 (sliding window mean Q)" data-en="Quality threshold (sliding window mean Q)">品質閾值</span> <span id="valQ">20</span></label><input type="range" id="sliderQ" min="5" max="35" value="20" step="1"></div>
+<div class="slider-group"><label><span data-zh="最短保留讀長 (min length)" data-en="Min length to keep">最短讀長</span> <span id="valMinLen">36</span></label><input type="range" id="sliderMinLen" min="20" max="100" value="36" step="2"></div>
+<div class="chart-container"><canvas id="trimChart"></canvas></div>
+<p style="font-size:.82rem;color:var(--c-ink-muted);text-align:center;" data-lang="zh">X: 讀長 (bp) | Y: 該長度的 read 數</p>
+<p style="font-size:.82rem;color:var(--c-ink-muted);text-align:center;" data-lang="en">X: read length (bp) | Y: reads at that length</p>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="工具比較" data-en="TOOL COMPARISON">工具比較</div>
+<h2 data-zh="三、QC/Trimming 工具一覽" data-en="III. QC/Trimming Tool Comparison">三、QC/Trimming 工具一覽</h2>
+<table class="comp-table">
+<thead><tr><th data-zh="工具" data-en="Tool">工具</th><th data-zh="速度" data-en="Speed">速度</th><th data-zh="特點" data-en="Highlight">特點</th><th data-zh="適用" data-en="Use case">適用</th></tr></thead>
+<tbody>
+<tr><td><strong>FastQC</strong></td><td>★★★★</td><td data-lang="zh">業界 QC 報告標準</td><td data-lang="zh">所有原始/處理後資料</td><td data-lang="en">Industry-standard QC report</td><td data-lang="en">All raw / processed data</td></tr>
+<tr><td><strong>MultiQC</strong></td><td>★★★★★</td><td data-lang="zh">聚合多樣本 FastQC + 其他工具報告</td><td data-lang="zh">大型專案、批次效應檢查</td><td data-lang="en">Aggregates FastQC + other tools across samples</td><td data-lang="en">Large projects, batch checks</td></tr>
+<tr><td><strong>fastp</strong></td><td>★★★★★</td><td data-lang="zh">QC + trim + adapter detection + JSON 報告，all-in-one</td><td data-lang="zh">現代化首選</td><td data-lang="en">QC + trim + adapter detection + JSON, all-in-one</td><td data-lang="en">Modern default</td></tr>
+<tr><td><strong>Trim Galore</strong></td><td>★★★</td><td data-lang="zh">基於 cutadapt 的友善包裝，RRBS 友善</td><td data-lang="zh">RRBS / 甲基化</td><td data-lang="en">cutadapt wrapper, RRBS-friendly</td><td data-lang="en">RRBS / methylation</td></tr>
+<tr><td><strong>Trimmomatic</strong></td><td>★★★</td><td data-lang="zh">老牌穩定，sliding window 演算法</td><td data-lang="zh">老 pipeline 維護</td><td data-lang="en">Reliable, sliding window algorithm</td><td data-lang="en">Legacy pipeline maintenance</td></tr>
+<tr><td><strong>NanoFilt / NanoPlot</strong></td><td>★★★★</td><td data-lang="zh">專為 ONT 長讀長設計</td><td data-lang="zh">ONT / PacBio 資料</td><td data-lang="en">Designed for ONT long reads</td><td data-lang="en">ONT / PacBio data</td></tr>
+</tbody></table>
+
+<div class="callout tip"><span class="callout-icon">⚡</span><div>
+<span data-lang="zh"><strong>建議組合：</strong>2025 主流流程通常是 <code>fastp</code>（QC + 一步式 trim）→ <code>MultiQC</code> 聚合報告。長讀長則用 <code>NanoPlot</code> + <code>filtlong</code>。</span>
+<span data-lang="en"><strong>Recommended stack:</strong> 2025 mainstream is <code>fastp</code> (QC + one-shot trim) → <code>MultiQC</code> aggregation. For long reads, use <code>NanoPlot</code> + <code>filtlong</code>.</span>
+</div></div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="決策引導" data-en="DECISION GUIDE">決策引導</div>
+<h2 data-zh="四、Trimming 策略決策" data-en="IV. Trimming Strategy Decisions">四、Trimming 策略決策</h2>
+
+<div class="decision-tree">
+<h4>🌳 <span data-zh="Trimming 模式選擇" data-en="Trimming Mode Selection">Trimming 模式選擇</span></h4>
+<div data-lang="zh">
+<div class="dt-node"><span class="dt-q">Q1:</span><div>NovaSeq / NextSeq 雙色化學？<span class="dt-arrow">→ 是 →</span> 開啟 <strong>polyG trimming</strong>（fastp 預設 on）。沒做的話 polyG 尾巴會錯誤地比對到 G-rich 區域。</div></div>
+<div class="dt-node"><span class="dt-q">Q2:</span><div>短 insert（cell-free DNA、microRNA、circulating tumor DNA）？<span class="dt-arrow">→ 是 →</span> 一定要 adapter trim，並考慮 paired-end overlap correction（fastp <code>--correction</code>）。</div></div>
+<div class="dt-node"><span class="dt-q">Q3:</span><div>RNA-seq 用 Salmon/STAR？<span class="dt-arrow">→ 是 →</span> Salmon 對輕度 adapter 殘留容忍度高，<strong>輕度 trim</strong> 即可；STAR 對 adapter 較敏感，<strong>建議 trim</strong>。</div></div>
+<div class="dt-node"><span class="dt-q">Q4:</span><div>變異呼叫 (variant calling)？<span class="dt-arrow">→ 是 →</span> <strong>不要過嚴！</strong>過短的 reads 會降低 mapping quality 而被 GATK 忽略。Q20 floor + adapter + min length 36–50 足夠。</div></div>
+<div class="dt-node"><span class="dt-q">Q5:</span><div>ONT / PacBio 長讀長？<span class="dt-arrow">→ 是 →</span> <strong>不要做 base-level quality trimming</strong>！只做 length filtering（filtlong）；長讀長的 Q 分數本質意義不同。</div></div>
+</div>
+<div data-lang="en">
+<div class="dt-node"><span class="dt-q">Q1:</span><div>NovaSeq / NextSeq 2-color chemistry? <span class="dt-arrow">→ Yes →</span> Enable <strong>polyG trimming</strong> (fastp default on). Without it, polyG tails misalign to G-rich regions.</div></div>
+<div class="dt-node"><span class="dt-q">Q2:</span><div>Short insert (cfDNA, microRNA, ctDNA)? <span class="dt-arrow">→ Yes →</span> Adapter trim is mandatory; consider paired-end overlap correction (fastp <code>--correction</code>).</div></div>
+<div class="dt-node"><span class="dt-q">Q3:</span><div>RNA-seq with Salmon/STAR? <span class="dt-arrow">→ Yes →</span> Salmon tolerates mild adapter residue (<strong>light trim</strong>); STAR is more sensitive (<strong>recommend trim</strong>).</div></div>
+<div class="dt-node"><span class="dt-q">Q4:</span><div>Variant calling? <span class="dt-arrow">→ Yes →</span> <strong>Don't over-trim!</strong> Reads that become too short lose mapping quality and GATK discards them. Q20 floor + adapter + min length 36–50 is enough.</div></div>
+<div class="dt-node"><span class="dt-q">Q5:</span><div>ONT / PacBio long reads? <span class="dt-arrow">→ Yes →</span> <strong>Don't do base-level quality trimming!</strong> Only length filter (filtlong); long-read Q-scores have different semantics.</div></div>
+</div>
+</div>
+
+<div class="callout warn"><span class="callout-icon">⚠️</span><div>
+<span data-lang="zh"><strong>常見錯誤：</strong>① 對 ONT 資料用 Q20 sliding window — 會把 reads 切成碎片；② 對 ChIP-seq 嚴格去重複 — 會誤刪 peak 訊號；③ 直接用 FastQC 預設閾值判斷「過 / 不過」— FastQC 的紅綠燈只是參考！</span>
+<span data-lang="en"><strong>Common mistakes:</strong> ① Q20 sliding window on ONT — shreds reads into fragments; ② Aggressive duplicate removal on ChIP-seq — discards peak signal; ③ Using FastQC default thresholds as pass/fail gates — the traffic lights are just hints!</span>
+</div></div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="程式碼" data-en="CODE">程式碼</div>
+<h2 data-zh="QC + Trimming 實作範例" data-en="QC + Trimming Examples">QC + Trimming 實作範例</h2>
+<div class="code-tabs">
+<div class="code-tab-btns">
+  <button class="code-tab-btn active" onclick="switchTab(this,'b1')">Bash</button>
+  <button class="code-tab-btn" onclick="switchTab(this,'p1')">Python</button>
+  <button class="code-tab-btn" onclick="switchTab(this,'r1')">R</button>
+  <button class="code-tab-btn" onclick="switchTab(this,'nf1')">Nextflow</button>
+</div>
+<div class="code-tab-content active" id="b1"><pre><span class="comment"># FastQC（單樣本 QC 報告）/ FastQC per-sample</span>
+fastqc -o qc_out/ -t <span class="num">8</span> sample_R1.fastq.gz sample_R2.fastq.gz
+
+<span class="comment"># fastp（QC + trim 一步完成）/ fastp all-in-one</span>
+fastp \
+  -i sample_R1.fastq.gz -I sample_R2.fastq.gz \
+  -o trim_R1.fq.gz       -O trim_R2.fq.gz \
+  --detect_adapter_for_pe \
+  --trim_poly_g \
+  --cut_tail --cut_tail_window_size <span class="num">4</span> --cut_tail_mean_quality <span class="num">20</span> \
+  --length_required <span class="num">36</span> \
+  --json fastp.json --html fastp.html \
+  --thread <span class="num">8</span>
+
+<span class="comment"># MultiQC（聚合所有報告）/ MultiQC aggregate</span>
+multiqc qc_out/ trim_logs/ -o multiqc_report/
+
+<span class="comment"># ONT 長讀長 QC / Long-read QC</span>
+NanoPlot --fastq sample.fastq.gz -o nanoplot_out/
+filtlong --min_length <span class="num">1000</span> --min_mean_q <span class="num">7</span> sample.fastq.gz | gzip &gt; filtered.fq.gz</pre></div>
+
+<div class="code-tab-content" id="p1"><pre><span class="comment"># 自寫滑動視窗 trimmer / Custom sliding-window trimmer</span>
+<span class="kw">from</span> Bio <span class="kw">import</span> SeqIO
+<span class="kw">import</span> gzip
+
+<span class="kw">def</span> sliding_trim(rec, win=<span class="num">4</span>, q=<span class="num">20</span>, min_len=<span class="num">36</span>):
+    quals = rec.letter_annotations[<span class="str">"phred_quality"</span>]
+    cut = <span class="func">len</span>(quals)
+    <span class="kw">for</span> i <span class="kw">in</span> <span class="func">range</span>(<span class="func">len</span>(quals) - win, <span class="num">0</span>, -<span class="num">1</span>):
+        <span class="kw">if</span> <span class="func">sum</span>(quals[i:i+win]) / win &gt;= q:
+            cut = i + win
+            <span class="kw">break</span>
+    <span class="kw">if</span> cut &lt; min_len: <span class="kw">return</span> <span class="kw">None</span>
+    <span class="kw">return</span> rec[:cut]
+
+<span class="kw">with</span> gzip.open(<span class="str">"in.fq.gz"</span>, <span class="str">"rt"</span>) <span class="kw">as</span> fin, \
+     gzip.open(<span class="str">"out.fq.gz"</span>, <span class="str">"wt"</span>) <span class="kw">as</span> fout:
+    <span class="kw">for</span> r <span class="kw">in</span> SeqIO.parse(fin, <span class="str">"fastq"</span>):
+        out = sliding_trim(r)
+        <span class="kw">if</span> out: SeqIO.write(out, fout, <span class="str">"fastq"</span>)</pre></div>
+
+<div class="code-tab-content" id="r1"><pre><span class="comment"># ShortRead — 自訂 QC 與簡易 trim</span>
+<span class="func">library</span>(ShortRead)
+fq &lt;- <span class="func">readFastq</span>(<span class="str">"sample_R1.fastq.gz"</span>)
+
+<span class="comment"># 末端品質衰減視覺化 / Visualize 3' decay</span>
+qm &lt;- <span class="kw">as</span>(<span class="func">quality</span>(fq), <span class="str">"matrix"</span>)
+<span class="func">plot</span>(<span class="func">colMeans</span>(qm, na.rm=<span class="kw">TRUE</span>), type=<span class="str">"l"</span>,
+     xlab=<span class="str">"Cycle"</span>, ylab=<span class="str">"Mean Q"</span>, main=<span class="str">"Per-cycle quality"</span>)
+<span class="func">abline</span>(h=<span class="num">20</span>, col=<span class="str">"red"</span>, lty=<span class="num">2</span>)
+
+<span class="comment"># 移除尾端品質 &lt; Q20 的鹼基 / Trim 3' bases below Q20</span>
+trimmed &lt;- <span class="func">trimTailw</span>(fq, k=<span class="num">2</span>, a=<span class="str">"5"</span>, halfwidth=<span class="num">2</span>)  <span class="comment"># 5 = Q20 in Phred+33</span>
+<span class="func">writeFastq</span>(trimmed, <span class="str">"trimmed.fq.gz"</span>)</pre></div>
+
+<div class="code-tab-content" id="nf1"><pre><span class="comment">// fastp Nextflow process / Nextflow fastp 流程</span>
+<span class="kw">process</span> FASTP {
+  tag <span class="str">"$meta.id"</span>
+  publishDir <span class="str">"results/fastp"</span>, mode: <span class="str">'copy'</span>
+  cpus <span class="num">8</span>; memory <span class="str">'16 GB'</span>
+
+  input:
+    tuple val(meta), path(reads)
+
+  output:
+    tuple val(meta), path(<span class="str">"*_trim_*.fq.gz"</span>), emit: trimmed
+    path <span class="str">"*.json"</span>, emit: json
+    path <span class="str">"*.html"</span>, emit: html
+
+  script:
+  <span class="str">"""
+  fastp \\
+    -i ${reads[0]} -I ${reads[1]} \\
+    -o ${meta.id}_trim_R1.fq.gz -O ${meta.id}_trim_R2.fq.gz \\
+    --detect_adapter_for_pe --trim_poly_g \\
+    --cut_tail --length_required 36 \\
+    -j ${meta.id}.json -h ${meta.id}.html \\
+    --thread ${task.cpus}
+  """</span>
+}
+
+<span class="comment">// 或直接使用 nf-core/fastqc + nf-core/fastp module</span>
+<span class="comment">// nf-core install fastp; nextflow pull nf-core/sarek</span></pre></div>
+</div>
+</section>
+
+<section class="quiz-section">
+<h3>📝 <span data-zh="自我檢測" data-en="Self-Check">自我檢測</span></h3>
+<div class="quiz-q" data-answer="2">
+<p data-lang="zh">1. FastQC 報告中 "Per base sequence quality" 顯示 R2 從 cycle 80 後中位數掉到 Q15，最合理的處理？</p>
+<p data-lang="en">1. FastQC's "Per base sequence quality" shows R2 median drops to Q15 after cycle 80. Most reasonable action?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. 整個樣本重做定序</span><span data-lang="en">A. Resequence the entire sample</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. 完全丟棄 R2，只用 R1 做 single-end 分析</span><span data-lang="en">B. Discard R2 entirely, run single-end with R1</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. 對 R2 用 sliding-window trim（Q20 cutoff），保留高品質前段</span><span data-lang="en">C. Sliding-window trim R2 (Q20 cutoff) to keep the high-quality 5' portion</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. 沒問題，繼續比對</span><span data-lang="en">D. No action needed, proceed to alignment</span></div>
+</div><div class="quiz-feedback" id="fb1"></div></div>
+
+<div class="quiz-q" data-answer="2">
+<p data-lang="zh">2. NovaSeq 資料的 3' 端出現大量 polyG，最可能原因是？</p>
+<p data-lang="en">2. NovaSeq data shows lots of polyG at the 3' end. Most likely cause?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. 樣本有 G-rich 區段（如端粒）富集</span><span data-lang="en">A. The sample is enriched for G-rich regions (e.g., telomeres)</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. PCR 偏誤</span><span data-lang="en">B. PCR bias</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. 雙色化學在無訊號 (dark) cycle 預設叫成 G</span><span data-lang="en">C. 2-color chemistry calls "no signal" cycles as G by default</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. Adapter 序列以 G 結尾</span><span data-lang="en">D. The adapter sequence ends with G</span></div>
+</div><div class="quiz-feedback" id="fb2"></div></div>
+
+<div class="quiz-q" data-answer="1">
+<p data-lang="zh">3. 你準備做 SV calling（結構變異），最不應該做的 trimming 設定是？</p>
+<p data-lang="en">3. You're preparing for SV calling. Which trimming setting is most harmful?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. fastp --trim_poly_g</span><span data-lang="en">A. fastp --trim_poly_g</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. 過嚴的 sliding-window（如 Q30 cutoff）大量縮短 read</span><span data-lang="en">B. Aggressive sliding-window (e.g., Q30 cutoff) shortening reads significantly</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. 移除已知 adapter 序列</span><span data-lang="en">C. Removing known adapter sequences</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. 篩除長度 &lt; 36 bp 的 reads</span><span data-lang="en">D. Filtering reads shorter than 36 bp</span></div>
+</div><div class="quiz-feedback" id="fb3"></div></div>
+</section>
+
+<nav class="page-nav">
+<a href="sequencing.html"><span class="nav-dir" data-zh="← 上一步" data-en="← Previous">← 上一步</span><span class="nav-title" data-zh="Step 1: 定序技術與 FASTQ 格式" data-en="Step 1: Sequencing Technologies &amp; FASTQ Format">Step 1: 定序技術與 FASTQ 格式</span></a>
+<a href="alignment.html"><span class="nav-dir" data-zh="下一步 →" data-en="Next →">下一步 →</span><span class="nav-title" data-zh="Step 3: 序列比對 (Read Alignment)" data-en="Step 3: Read Alignment">Step 3: 序列比對 (Read Alignment)</span></a>
+</nav>
+</main>
+<footer class="site-footer">© Charlene — Genomics Interactive Tutorial</footer>
+<script src="i18n.js"></script>
+<script>
+window.addEventListener('scroll',()=>{const h=document.documentElement;document.getElementById('progressBar').style.width=(h.scrollTop/(h.scrollHeight-h.clientHeight))*100+'%';});
+function switchTab(b,id){const p=b.closest('.code-tabs');p.querySelectorAll('.code-tab-btn').forEach(x=>x.classList.remove('active'));p.querySelectorAll('.code-tab-content').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.getElementById(id).classList.add('active');}
+
+// Generate read length distribution (post-trim)
+function randn(){let u=0,v=0;while(u===0)u=Math.random();while(v===0)v=Math.random();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+const reads=[];
+for(let i=0;i<3000;i++){
+  // simulate read length AFTER quality trim with cycle-decay model
+  // base length 150, with quality decay starting around cycle 100
+  const decayStart = 90 + randn()*15;
+  const baseQuality = 35 + randn()*3;
+  const slope = 0.25 + Math.abs(randn())*0.15;
+  reads.push({decayStart, baseQuality, slope, fullLen: 150});
+}
+
+const trimChart=new Chart(document.getElementById('trimChart'),{type:'bar',data:{labels:[],datasets:[
+  {label:'Kept',data:[],backgroundColor:'rgba(26,107,90,0.7)'},
+  {label:'Dropped (too short)',data:[],backgroundColor:'rgba(192,57,43,0.6)'}
+]},options:{responsive:true,maintainAspectRatio:false,animation:false,scales:{x:{stacked:true,title:{display:true,text:'Read length (bp)'}},y:{stacked:true,title:{display:true,text:'Read count'}}},plugins:{legend:{position:'top'}}}});
+
+function updateTrim(){
+  const Qcut=+document.getElementById('sliderQ').value;
+  const minLen=+document.getElementById('sliderMinLen').value;
+  document.getElementById('valQ').textContent=Qcut;
+  document.getElementById('valMinLen').textContent=minLen;
+
+  // bucket length distribution
+  const buckets={};
+  let totalKept=0, totalDrop=0, sumLen=0;
+  reads.forEach(r=>{
+    // estimate trim point: where rolling quality drops below Qcut
+    let cut=r.fullLen;
+    for(let pos=r.fullLen;pos>0;pos--){
+      const q = r.baseQuality - Math.max(0, (pos - r.decayStart)*r.slope);
+      if(q >= Qcut){cut=pos; break;}
+    }
+    const len = Math.max(0, Math.min(r.fullLen, Math.round(cut)));
+    const bucket = Math.floor(len/10)*10;
+    if(!buckets[bucket]) buckets[bucket]={kept:0,drop:0};
+    if(len>=minLen){buckets[bucket].kept++; totalKept++; sumLen+=len;}
+    else{buckets[bucket].drop++; totalDrop++;}
+  });
+  const keys=Object.keys(buckets).map(Number).sort((a,b)=>a-b);
+  trimChart.data.labels=keys.map(k=>k+'–'+(k+9));
+  trimChart.data.datasets[0].data=keys.map(k=>buckets[k].kept);
+  trimChart.data.datasets[1].data=keys.map(k=>buckets[k].drop);
+  const L=I18n.get();
+  document.getElementById('trimKept').textContent=(L==='zh'?'保留: ':'Kept: ')+totalKept+' ('+(100*totalKept/reads.length).toFixed(1)+'%)';
+  document.getElementById('trimDropped').textContent=(L==='zh'?'丟棄: ':'Dropped: ')+totalDrop;
+  document.getElementById('trimMeanLen').textContent=(L==='zh'?'平均長: ':'Mean len: ')+(totalKept?(sumLen/totalKept).toFixed(1):0)+' bp';
+  trimChart.data.datasets[0].label=L==='zh'?'保留':'Kept';
+  trimChart.data.datasets[1].label=L==='zh'?'丟棄（過短）':'Dropped (too short)';
+  trimChart.update('none');
+}
+['sliderQ','sliderMinLen'].forEach(id=>document.getElementById(id).addEventListener('input',updateTrim));
+document.addEventListener('langchange',updateTrim);
+updateTrim();
+
+// Quiz
+const QF={zh:{q1_y:'品質衰減的後段應 trim，前段仍可用；丟掉整條 R2 浪費資料。',q1_n:'正確答案已標示。',q2_y:'雙色化學（NovaSeq/NextSeq）以「無訊號」表示 G，cluster 耗盡後出現 polyG 尾。',q2_n:'正確答案已標示。',q3_y:'過嚴 trim 會縮短 reads 導致 SV breakpoint 訊號流失。',q3_n:'正確答案已標示。'},en:{q1_y:'Trim the decayed tail and keep the good 5\\' portion; discarding R2 wastes data.',q1_n:'Correct answer highlighted.',q2_y:'2-color chemistry encodes "no signal" as G; cluster exhaustion creates polyG tails.',q2_n:'Correct answer highlighted.',q3_y:'Over-trimming shortens reads and loses SV breakpoint evidence.',q3_n:'Correct answer highlighted.'}};
+document.querySelectorAll('.quiz-q').forEach((q,qi)=>{const ans=+q.dataset.answer;q.querySelectorAll('.quiz-opt').forEach(o=>{o.addEventListener('click',()=>{if(q.classList.contains('answered'))return;q.classList.add('answered');const fb=document.getElementById('fb'+(qi+1));const ok=+o.dataset.idx===ans;o.classList.add(ok?'correct':'wrong');if(!ok)q.querySelectorAll('.quiz-opt')[ans].classList.add('correct');const L=I18n.get();fb.className='quiz-feedback show '+(ok?'correct-fb':'wrong-fb');fb.textContent=(ok?'✅ ':'❌ ')+(QF[L]['q'+(qi+1)+'_'+(ok?'y':'n')]||'');});});});
+</script>
+</body></html>

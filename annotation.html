@@ -1,0 +1,299 @@
+<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Step 6: Variant Annotation — Genomics Tutorial</title>
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+</head><body>
+<nav class="top-nav"><div class="top-nav-inner">
+  <a href="index.html" class="top-nav-brand"><span>🧬</span> <span data-zh="基因體學教學" data-en="Genomics Tutorial">基因體學教學</span></a>
+  <ul class="top-nav-links"><li><a href="sequencing.html">Seq</a></li><li><a href="qc.html">QC</a></li><li><a href="alignment.html">Align</a></li><li><a href="postalign.html">PostAlign</a></li><li><a href="variant-calling.html">VarCall</a></li><li><a href="annotation.html" class="active">Annot</a></li><li><a href="sv-cnv.html">SV/CNV</a></li><li><a href="rnaseq.html">RNA-seq</a></li><li><a href="chip-atac.html">ChIP/ATAC</a></li><li><a href="methylation.html">Methyl</a></li><li><a href="gwas.html">GWAS</a></li><li><a href="popgen.html">PopGen</a></li><li><a href="enrichment.html">Enrich</a></li><li><a href="workflow.html">Pipeline</a></li>
+    <li><a href="references/index.html" data-zh="📚 參考資料" data-en="📚 References">📚 參考資料</a></li>
+  </ul>
+</div></nav>
+<div class="progress-bar-container"><div class="progress-bar" id="progressBar"></div></div>
+<header class="page-hero"><div class="step-badge">STEP 6 / 14</div>
+<h1 data-zh="變異註釋與過濾" data-en="Variant Annotation & Filtering">變異註釋與過濾</h1>
+<p class="subtitle" data-lang="zh">把 VCF 裡的位點轉成「這個變異是什麼、會做什麼、有多稀有」。</p>
+<p class="subtitle" data-lang="en">Turn VCF coordinates into "what this variant is, what it does, and how rare it is".</p>
+</header>
+<main class="content-wrap">
+
+<section class="section">
+<div class="section-label" data-zh="概覽" data-en="OVERVIEW">概覽</div>
+<h2 data-zh="從位置到生物學意義" data-en="From coordinates to biological meaning">從位置到生物學意義</h2>
+<div data-lang="zh">
+<p>VCF 給的是 <code>chr1:155235855 G&gt;A</code>——但臨床或研究最關心的是：<strong>它落在哪個基因？造成 missense / stop-gain / synonymous？是 ClinVar 已知 pathogenic？在 gnomAD 多稀有？</strong></p>
+<p>變異註釋工具吃 VCF 吐強化 VCF（多加 INFO 欄位），把基因位置、protein change、人口頻率、ClinVar 致病性、in-silico 預測（CADD、REVEL、AlphaMissense）都打上去。然後再做<strong>變異過濾</strong>——保留稀有、有功能影響的位點。</p>
+</div>
+<div data-lang="en">
+<p>A VCF gives you <code>chr1:155235855 G&gt;A</code> — but clinical/research interpretation needs: <strong>which gene? missense / stop-gain / synonymous? Is it ClinVar pathogenic? How rare in gnomAD?</strong></p>
+<p>Annotation tools consume VCF and emit enriched VCF (more INFO fields) tagged with gene location, protein change, population frequencies, ClinVar pathogenicity, in-silico predictions (CADD, REVEL, AlphaMissense). Then <strong>filter</strong> to keep rare, functional candidates.</p>
+</div>
+<div class="callout tip"><span class="callout-icon">💡</span><div>
+<span data-lang="zh"><strong>核心原則：</strong>單一註釋工具不足以下臨床判斷。<strong>跨工具一致 (cross-tool consensus)</strong> 才是黃金標準——2025 ClinVar 研究顯示 VEP、SnpEff、ANNOVAR 對 LoF 分類存在顯著差異。</span>
+<span data-lang="en"><strong>Core principle:</strong> A single annotator is insufficient for clinical decisions. <strong>Cross-tool consensus</strong> is the gold standard — a 2025 ClinVar study found significant disagreement between VEP, SnpEff, and ANNOVAR on LoF classifications.</span>
+</div></div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="主流工具" data-en="ANNOTATORS">主流工具</div>
+<h2 data-zh="一、三大主流註釋器" data-en="I. The Big Three Annotators">一、三大主流註釋器</h2>
+<div class="card-grid cols-3">
+<div class="card"><div class="card-icon">🐎</div><h4>VEP (Ensembl)</h4>
+<div data-lang="zh"><p>Ensembl 維護的 perl-based 註釋器。<strong>強項：</strong>transcript 覆蓋最廣（67,695 transcripts）、HGVSp 準確度最高 (0.977)、官方 API 與 plugin 系統（CADD、REVEL、AlphaMissense、SpliceAI 都有 plugin）。<strong>適用：</strong>研究、臨床、雲端規模。</p></div>
+<div data-lang="en"><p>Ensembl's perl-based annotator. <strong>Strengths:</strong> widest transcript coverage (67,695), highest HGVSp accuracy (0.977), rich plugin system (CADD, REVEL, AlphaMissense, SpliceAI). <strong>Use:</strong> research, clinical, cloud scale.</p></div>
+</div>
+<div class="card"><div class="card-icon">🐍</div><h4>SnpEff</h4>
+<div data-lang="zh"><p>Java-based，自帶大量物種預建 database。<strong>強項：</strong>HGVSc 表現最佳 (0.988)、支援 SV 註釋、容易整合進 pipeline、執行速度快。<strong>適用：</strong>非模式物種、SV 註釋、teaching。</p></div>
+<div data-lang="en"><p>Java-based, ships with prebuilt databases for many species. <strong>Strengths:</strong> best HGVSc accuracy (0.988), supports SV annotation, easy pipeline integration, fast. <strong>Use:</strong> non-model species, SV annotation, teaching.</p></div>
+</div>
+<div class="card"><div class="card-icon">📊</div><h4>ANNOVAR</h4>
+<div data-lang="zh"><p>perl-based，注重表格化輸出。<strong>強項：</strong>輸出 TSV 易讀、整合 dbNSFP（含 50+ 預測分數）、適合下游 R/Python 分析。<strong>弱項：</strong>商業授權限制、transcript 庫更新較慢。</p></div>
+<div data-lang="en"><p>Perl-based, focused on tabular output. <strong>Strengths:</strong> TSV-friendly output, integrates dbNSFP (50+ prediction scores), easy R/Python downstream. <strong>Weakness:</strong> commercial license restrictions, slower transcript database updates.</p></div>
+</div>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="變異後果" data-en="CONSEQUENCES">變異後果</div>
+<h2 data-zh="二、Sequence Ontology 變異類別" data-en="II. Sequence Ontology Consequences">二、Sequence Ontology 變異類別</h2>
+<table class="comp-table">
+<thead><tr><th data-zh="後果類別" data-en="Consequence">後果</th><th data-zh="說明" data-en="Description">說明</th><th data-zh="嚴重性 (SO)" data-en="Severity (SO)">嚴重性</th></tr></thead>
+<tbody>
+<tr><td><strong>stop_gained</strong></td><td data-lang="zh">引入提前終止密碼子；蛋白質截斷</td><td data-zh="HIGH" data-en="HIGH">HIGH</td><td data-lang="en">Introduces premature stop codon; truncates protein</td></tr>
+<tr><td><strong>frameshift_variant</strong></td><td data-lang="zh">非 3 的倍數 indel；後續閱讀框崩壞</td><td>HIGH</td><td data-lang="en">Non-multiple-of-3 indel; disrupts reading frame</td></tr>
+<tr><td><strong>splice_acceptor / donor</strong></td><td data-lang="zh">改變 splice site，可能造成 exon skipping 或 intron retention</td><td>HIGH</td><td data-lang="en">Alters splice site — can cause exon skipping / intron retention</td></tr>
+<tr><td><strong>missense_variant</strong></td><td data-lang="zh">改變一個胺基酸（如 p.Arg175His）</td><td>MODERATE</td><td data-lang="en">Single amino acid change (e.g., p.Arg175His)</td></tr>
+<tr><td><strong>inframe_insertion / deletion</strong></td><td data-lang="zh">3 的倍數 indel，新增或刪除胺基酸但維持閱讀框</td><td>MODERATE</td><td data-lang="en">Multiple-of-3 indel; adds/removes amino acids in frame</td></tr>
+<tr><td><strong>synonymous_variant</strong></td><td data-lang="zh">DNA 改變但胺基酸不變（同義）</td><td>LOW</td><td data-lang="en">DNA change with same amino acid (silent)</td></tr>
+<tr><td><strong>5'_UTR / 3'_UTR variant</strong></td><td data-lang="zh">非編碼但可影響翻譯效率或 miRNA 結合</td><td>MODIFIER</td><td data-lang="en">Non-coding; may affect translation or miRNA binding</td></tr>
+<tr><td><strong>intron / intergenic</strong></td><td data-lang="zh">基因內含子或基因間區</td><td>MODIFIER</td><td data-lang="en">Intronic or intergenic regions</td></tr>
+</tbody></table>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="互動模擬" data-en="INTERACTIVE">互動模擬</div>
+<h2 data-zh="三、變異過濾漏斗模擬器" data-en="III. Variant Filtering Funnel">三、變異過濾漏斗模擬器</h2>
+<div data-lang="zh"><p>典型臨床/疾病基因發掘流程：3M raw → ~500 candidates → ~5 high-confidence。拖動滑桿觀察每層過濾後剩餘變異數。</p></div>
+<div data-lang="en"><p>Typical clinical / disease-gene discovery funnel: 3M raw → ~500 candidates → ~5 high-confidence. Drag sliders to see how each filter reduces variant counts.</p></div>
+
+<div class="interactive-panel">
+<div class="sim-stats" id="funnelStats"></div>
+<div class="slider-group"><label><span data-zh="保留 PASS 變異" data-en="Keep PASS variants only">PASS 過濾</span> <span id="valPass">98%</span></label><input type="range" id="slPass" min="50" max="100" value="98" step="1"></div>
+<div class="slider-group"><label><span data-zh="gnomAD AF 上限" data-en="gnomAD AF threshold">AF 上限</span> <span id="valAF">0.01</span></label><input type="range" id="slAF" min="0.0001" max="0.5" value="0.01" step="0.0005"></div>
+<div class="slider-group"><label><span data-zh="只保留編碼區 + splice" data-en="Coding + splice only">編碼區過濾</span> <span id="valCoding">on</span></label><input type="range" id="slCoding" min="0" max="1" value="1" step="1"></div>
+<div class="slider-group"><label><span data-zh="CADD ≥ X" data-en="CADD ≥ X">CADD 閾值</span> <span id="valCADD">20</span></label><input type="range" id="slCADD" min="0" max="40" value="20" step="1"></div>
+<div class="chart-container"><canvas id="funnelChart"></canvas></div>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="人口資料庫" data-en="POPULATION DBs">人口資料庫</div>
+<h2 data-zh="四、必用的人口頻率資料庫" data-en="IV. Essential Population Frequency DBs">四、必用的人口頻率資料庫</h2>
+<div class="card-grid cols-2">
+<div class="card"><h4>🌐 gnomAD v4 (2024)</h4>
+<div data-lang="zh"><p>當前最大規模整合：807K exomes + 76K genomes，跨 8 大祖先群體。<strong>核心欄位：</strong> AF (整體)、AF_popmax (各群體最高)、AC_hom (同型 alt 個數)。<strong>原則：</strong>真正致病的罕見變異通常 AF_popmax &lt; 0.001 且 AC_hom = 0（或極少）。</p></div>
+<div data-lang="en"><p>Currently the largest integration: 807K exomes + 76K genomes across 8 ancestry groups. <strong>Key fields:</strong> AF (overall), AF_popmax (max across populations), AC_hom (homozygous alt count). <strong>Principle:</strong> truly pathogenic rare variants typically have AF_popmax &lt; 0.001 and AC_hom near zero.</p></div>
+</div>
+<div class="card"><h4>📝 ClinVar (NCBI)</h4>
+<div data-lang="zh"><p>已知致病性註解資料庫。<strong>分級：</strong>Pathogenic / Likely-Pathogenic / VUS（uncertain）/ Likely-Benign / Benign。<strong>注意：</strong>同一變異常有多個 submitter 結論衝突，需看 review status (★ 數越多越可信)。</p></div>
+<div data-lang="en"><p>Curated database of known pathogenicity. <strong>Tiers:</strong> Pathogenic / Likely-Pathogenic / VUS (uncertain) / Likely-Benign / Benign. <strong>Caveat:</strong> the same variant often has conflicting submitter calls — check review status (more ★ = more reliable).</p></div>
+</div>
+<div class="card"><h4>🔮 dbNSFP / CADD / AlphaMissense</h4>
+<div data-lang="zh"><p><strong>dbNSFP</strong> 聚合 SIFT、PolyPhen2、REVEL 等 40+ 預測分數。<strong>CADD</strong> 整合多 feature 為單一分數（≥ 20 = top 1% 有害）。<strong>AlphaMissense</strong>（DeepMind, 2023）用 AlphaFold 結構預測 missense 致病性，2024 後成為新一代主流分數。</p></div>
+<div data-lang="en"><p><strong>dbNSFP</strong> aggregates SIFT, PolyPhen2, REVEL, and 40+ scores. <strong>CADD</strong> integrates many features into a single score (≥ 20 = top 1% deleterious). <strong>AlphaMissense</strong> (DeepMind, 2023) uses AlphaFold structure to predict missense pathogenicity — a new standard since 2024.</p></div>
+</div>
+<div class="card"><h4>✂️ SpliceAI</h4>
+<div data-lang="zh"><p>Illumina 開發的 deep-learning splice predictor。預測一個位點是否影響 splice donor/acceptor。<strong>常用閾值：</strong>delta score ≥ 0.2（敏感）、≥ 0.5（嚴格）。<strong>適用：</strong>VEP 的 deep splice 機制；非編碼變異功能解讀關鍵。</p></div>
+<div data-lang="en"><p>Illumina's deep-learning splice predictor. Outputs whether a variant disrupts splice donor/acceptor. <strong>Thresholds:</strong> delta score ≥ 0.2 (sensitive), ≥ 0.5 (strict). <strong>Use:</strong> deep splice interpretation in VEP; essential for non-coding variant interpretation.</p></div>
+</div>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="決策引導" data-en="DECISION GUIDE">決策引導</div>
+<h2 data-zh="五、註釋與過濾策略" data-en="V. Annotation & Filtering Strategy">五、註釋與過濾策略</h2>
+<div class="decision-tree">
+<h4>🌳 <span data-zh="疾病基因發掘 (Mendelian) 流程" data-en="Mendelian Disease-Gene Discovery">疾病基因發掘 (Mendelian) 流程</span></h4>
+<div data-lang="zh">
+<div class="dt-node"><span class="dt-q">1.</span><div><strong>過濾 caller</strong>：保留 FILTER=PASS、QD ≥ 2、GQ ≥ 20、DP ≥ 10</div></div>
+<div class="dt-node"><span class="dt-q">2.</span><div><strong>稀有性</strong>：gnomAD AF_popmax &lt; 0.001（顯性）或 &lt; 0.01（隱性，且 AC_hom = 0）</div></div>
+<div class="dt-node"><span class="dt-q">3.</span><div><strong>功能性</strong>：保留 missense / LoF / splice，剔除 synonymous / deep intronic</div></div>
+<div class="dt-node"><span class="dt-q">4.</span><div><strong>in-silico</strong>：CADD ≥ 20、AlphaMissense pathogenic、SpliceAI delta ≥ 0.2</div></div>
+<div class="dt-node"><span class="dt-q">5.</span><div><strong>遺傳模式</strong>：trio 比對推 de novo / compound het / autosomal recessive</div></div>
+<div class="dt-node"><span class="dt-q">6.</span><div><strong>臨床知識</strong>：ClinVar P/LP、OMIM 疾病基因清單、表型對應 (HPO)</div></div>
+</div>
+<div data-lang="en">
+<div class="dt-node"><span class="dt-q">1.</span><div><strong>Caller QC</strong>: keep FILTER=PASS, QD ≥ 2, GQ ≥ 20, DP ≥ 10</div></div>
+<div class="dt-node"><span class="dt-q">2.</span><div><strong>Rarity</strong>: gnomAD AF_popmax &lt; 0.001 (dominant) or &lt; 0.01 (recessive, AC_hom = 0)</div></div>
+<div class="dt-node"><span class="dt-q">3.</span><div><strong>Function</strong>: keep missense / LoF / splice, drop synonymous / deep intronic</div></div>
+<div class="dt-node"><span class="dt-q">4.</span><div><strong>In-silico</strong>: CADD ≥ 20, AlphaMissense pathogenic, SpliceAI delta ≥ 0.2</div></div>
+<div class="dt-node"><span class="dt-q">5.</span><div><strong>Inheritance</strong>: trio analysis for de novo / compound het / autosomal recessive</div></div>
+<div class="dt-node"><span class="dt-q">6.</span><div><strong>Clinical knowledge</strong>: ClinVar P/LP, OMIM disease genes, phenotype matching (HPO)</div></div>
+</div>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="程式碼" data-en="CODE">程式碼</div>
+<h2 data-zh="註釋與過濾實作" data-en="Annotation & Filtering Examples">註釋與過濾實作</h2>
+<div class="code-tabs">
+<div class="code-tab-btns">
+  <button class="code-tab-btn active" onclick="switchTab(this,'b1')">Bash (VEP / SnpEff)</button>
+  <button class="code-tab-btn" onclick="switchTab(this,'b2')">Bash (bcftools filter)</button>
+  <button class="code-tab-btn" onclick="switchTab(this,'p1')">Python (cyvcf2)</button>
+</div>
+<div class="code-tab-content active" id="b1"><pre><span class="comment"># --- Ensembl VEP (Docker) ---</span>
+vep --cache --offline --dir_cache vep_cache/ \
+    --assembly GRCh38 --species homo_sapiens \
+    --input_file cohort.vcf.gz --output_file cohort.vep.vcf.gz \
+    --vcf --compress_output bgzip \
+    --canonical --symbol --hgvs --pubmed \
+    --plugin AlphaMissense,file=AlphaMissense_hg38.tsv.gz \
+    --plugin CADD,/refs/whole_genome_SNVs.tsv.gz \
+    --plugin SpliceAI,snv=/refs/spliceai_scores.snv.hg38.vcf.gz \
+    --custom /refs/gnomad.v4.exomes.vcf.bgz,gnomADe,vcf,exact,0,AF,AF_popmax \
+    --custom /refs/clinvar.vcf.gz,ClinVar,vcf,exact,0,CLNSIG,CLNDN \
+    --fork <span class="num">8</span>
+
+<span class="comment"># --- SnpEff (Java, 物種多) ---</span>
+snpEff -v GRCh38.105 cohort.vcf.gz &gt; cohort.snpeff.vcf
+snpEff stats -csvStats stats.csv cohort.snpeff.vcf
+
+<span class="comment"># --- ANNOVAR (TSV 友善) ---</span>
+table_annovar.pl cohort.vcf humandb/ -buildver hg38 \
+  -out cohort -remove \
+  -protocol refGene,clinvar_20240611,gnomad41_exome,dbnsfp47a \
+  -operation g,f,f,f -nastring . -vcfinput</pre></div>
+
+<div class="code-tab-content" id="b2"><pre><span class="comment"># --- bcftools 多層過濾 ---</span>
+<span class="comment"># 1) caller PASS</span>
+bcftools view -f PASS cohort.vep.vcf.gz -Oz -o pass.vcf.gz
+
+<span class="comment"># 2) gnomAD AF &lt; 0.01</span>
+bcftools view -i <span class="str">'INFO/gnomADe_AF_popmax&lt;0.01 | INFO/gnomADe_AF_popmax="."'</span> pass.vcf.gz \
+  -Oz -o rare.vcf.gz
+
+<span class="comment"># 3) 編碼區 + splice 功能性後果 (用 VEP 的 CSQ 欄位)</span>
+bcftools +split-vep rare.vcf.gz -c Consequence -O u | \
+  bcftools view -i <span class="str">'INFO/Consequence~"missense|stop_gained|frameshift|splice_acceptor|splice_donor"'</span> \
+  -Oz -o coding.vcf.gz
+
+<span class="comment"># 4) CADD ≥ 20</span>
+bcftools view -i <span class="str">'INFO/CADD_PHRED&gt;=20'</span> coding.vcf.gz -Oz -o candidates.vcf.gz
+bcftools index candidates.vcf.gz</pre></div>
+
+<div class="code-tab-content" id="p1"><pre><span class="comment"># cyvcf2 + pandas 走訪 VEP CSQ</span>
+<span class="kw">from</span> cyvcf2 <span class="kw">import</span> VCF
+<span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+vcf = VCF(<span class="str">"cohort.vep.vcf.gz"</span>)
+csq_keys = vcf.get_header_type(<span class="str">"CSQ"</span>)[<span class="str">"Description"</span>].split(<span class="str">"Format: "</span>)[<span class="num">1</span>].split(<span class="str">"|"</span>)
+
+rows = []
+<span class="kw">for</span> v <span class="kw">in</span> vcf:
+    <span class="kw">if</span> v.FILTER: <span class="kw">continue</span>
+    csq_list = v.INFO.get(<span class="str">"CSQ"</span>, <span class="str">""</span>).split(<span class="str">","</span>)
+    <span class="kw">for</span> entry <span class="kw">in</span> csq_list:
+        d = <span class="func">dict</span>(<span class="func">zip</span>(csq_keys, entry.split(<span class="str">"|"</span>)))
+        <span class="kw">if</span> d.get(<span class="str">"PICK"</span>) != <span class="str">"1"</span>: <span class="kw">continue</span>     <span class="comment"># canonical only</span>
+        rows.append({
+            <span class="str">"chrom"</span>: v.CHROM, <span class="str">"pos"</span>: v.POS,
+            <span class="str">"gene"</span>: d.get(<span class="str">"SYMBOL"</span>),
+            <span class="str">"consequence"</span>: d.get(<span class="str">"Consequence"</span>),
+            <span class="str">"hgvsp"</span>: d.get(<span class="str">"HGVSp"</span>),
+            <span class="str">"af_popmax"</span>: <span class="func">float</span>(d.get(<span class="str">"gnomADe_AF_popmax"</span>) <span class="kw">or</span> <span class="num">0</span>),
+            <span class="str">"cadd"</span>: <span class="func">float</span>(d.get(<span class="str">"CADD_PHRED"</span>) <span class="kw">or</span> <span class="num">0</span>),
+            <span class="str">"clinvar"</span>: d.get(<span class="str">"ClinVar_CLNSIG"</span>)
+        })
+
+df = pd.DataFrame(rows)
+<span class="comment"># 篩 candidate</span>
+cands = df[(df.af_popmax &lt; <span class="num">0.001</span>) &amp; (df.cadd &gt;= <span class="num">20</span>) &amp;
+           (df.consequence.str.contains(<span class="str">"missense|stop_gained|frameshift|splice"</span>))]
+<span class="func">print</span>(cands.head())</pre></div>
+</div>
+</section>
+
+<section class="quiz-section">
+<h3>📝 <span data-zh="自我檢測" data-en="Self-Check">自我檢測</span></h3>
+<div class="quiz-q" data-answer="2">
+<p data-lang="zh">1. 為什麼罕見疾病候選變異要看 gnomAD AC_hom = 0？</p>
+<p data-lang="en">1. Why check AC_hom = 0 in gnomAD for rare-disease candidates?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. AC_hom 高 = sequencing error 多</span><span data-lang="en">A. High AC_hom = more sequencing errors</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. 為了符合 trio 遺傳模式</span><span data-lang="en">B. To match trio inheritance</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. 若該位點在健康族群已有同型，致病性極低</span><span data-lang="en">C. If healthy controls are already homozygous, pathogenicity is unlikely</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. AC_hom 是註釋強度</span><span data-lang="en">D. AC_hom measures annotation confidence</span></div>
+</div><div class="quiz-feedback" id="fb1"></div></div>
+
+<div class="quiz-q" data-answer="2">
+<p data-lang="zh">2. Splice site 變異要怎麼最有效偵測？</p>
+<p data-lang="en">2. How to detect splice-site variants most effectively?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. 只看 ClinVar</span><span data-lang="en">A. ClinVar alone</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. 用 CADD &gt; 30</span><span data-lang="en">B. CADD &gt; 30</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. SpliceAI delta score（深度學習 splice 預測）</span><span data-lang="en">C. SpliceAI delta score (deep-learning splice prediction)</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. 直接看 RNA-seq 即可</span><span data-lang="en">D. Use RNA-seq directly</span></div>
+</div><div class="quiz-feedback" id="fb2"></div></div>
+
+<div class="quiz-q" data-answer="1">
+<p data-lang="zh">3. 哪種變異後果嚴重性最高？</p>
+<p data-lang="en">3. Which consequence has the highest severity?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. synonymous_variant</span><span data-lang="en">A. synonymous_variant</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. stop_gained / frameshift_variant</span><span data-lang="en">B. stop_gained / frameshift_variant</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. 3'_UTR_variant</span><span data-lang="en">C. 3'_UTR_variant</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. intron_variant</span><span data-lang="en">D. intron_variant</span></div>
+</div><div class="quiz-feedback" id="fb3"></div></div>
+</section>
+
+<nav class="page-nav">
+<a href="variant-calling.html"><span class="nav-dir" data-zh="← 上一步" data-en="← Previous">← 上一步</span><span class="nav-title" data-zh="Step 5: 變異呼叫 (SNV / Indel)" data-en="Step 5: Variant Calling (SNV / Indel)">Step 5: 變異呼叫 (SNV / Indel)</span></a>
+<a href="sv-cnv.html"><span class="nav-dir" data-zh="下一步 →" data-en="Next →">下一步 →</span><span class="nav-title" data-zh="Step 7: 結構變異與 CNV (SV &amp; CNV)" data-en="Step 7: Structural Variants &amp; CNVs">Step 7: 結構變異與 CNV (SV & CNV)</span></a>
+</nav>
+</main>
+<footer class="site-footer">© Charlene — Genomics Interactive Tutorial</footer>
+<script src="i18n.js"></script>
+<script>
+window.addEventListener('scroll',()=>{const h=document.documentElement;document.getElementById('progressBar').style.width=(h.scrollTop/(h.scrollHeight-h.clientHeight))*100+'%';});
+function switchTab(b,id){const p=b.closest('.code-tabs');p.querySelectorAll('.code-tab-btn').forEach(x=>x.classList.remove('active'));p.querySelectorAll('.code-tab-content').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.getElementById(id).classList.add('active');}
+
+// Funnel simulation
+const funnelChart=new Chart(document.getElementById('funnelChart'),{type:'bar',data:{labels:[],datasets:[{label:'Remaining variants',data:[],backgroundColor:['#3b82f6','#1a6b5a','#d4a03c','#c0392b','#8b5cf6']}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,scales:{x:{type:'logarithmic',title:{display:true,text:'Variants (log)'}}},plugins:{legend:{display:false}}}});
+
+function updateFunnel(){
+  const passPct=+document.getElementById('slPass').value/100;
+  const af=+document.getElementById('slAF').value;
+  const coding=+document.getElementById('slCoding').value;
+  const cadd=+document.getElementById('slCADD').value;
+  document.getElementById('valPass').textContent=Math.round(passPct*100)+'%';
+  document.getElementById('valAF').textContent=af.toFixed(4);
+  document.getElementById('valCoding').textContent=coding?'on':'off';
+  document.getElementById('valCADD').textContent=cadd;
+  // approximate counts based on typical WGS
+  const raw=4_500_000;
+  const afterPass=Math.round(raw*passPct);
+  // gnomAD: roughly P(AF below x) ~ x^0.6 for variants
+  const afFrac = Math.min(1, Math.pow(af*100, 0.55)*0.01);  // very rough heuristic
+  const afterAF=Math.round(afterPass*afFrac);
+  const codingFrac = coding ? 0.012 : 1;  // coding ~1.2% of genome
+  const afterCoding=Math.round(afterAF*codingFrac);
+  // CADD: top 1% = 20; top 0.1% = 30; rough
+  const caddFrac = Math.max(0.001, Math.pow(10,-cadd/10));
+  const afterCADD=Math.round(afterCoding*caddFrac);
+  const labels=['Raw VCF','After PASS','After AF filter','After coding/splice','After CADD'];
+  const data=[raw,afterPass,afterAF,afterCoding,afterCADD];
+  funnelChart.data.labels=labels;
+  funnelChart.data.datasets[0].data=data;
+  funnelChart.update('none');
+  const stats=labels.map((l,i)=>`<span class="sim-stat ${i<labels.length-1?'pass':'fail'}">${l}: ${data[i].toLocaleString()}</span>`).join('');
+  document.getElementById('funnelStats').innerHTML=stats;
+}
+['slPass','slAF','slCoding','slCADD'].forEach(id=>document.getElementById(id).addEventListener('input',updateFunnel));
+document.addEventListener('langchange',updateFunnel);
+updateFunnel();
+
+const QF={zh:{q1_y:'健康族群已有同型 alt 的位點，幾乎不可能是嚴重隱性致病變異。',q1_n:'正確答案已標示。',q2_y:'SpliceAI 是 deep learning splice 預測標準，比 generic CADD/SIFT 更專一。',q2_n:'正確答案已標示。',q3_y:'stop_gained 與 frameshift 屬於 LoF（功能喪失）；Sequence Ontology 嚴重性等級 HIGH。',q3_n:'正確答案已標示。'},en:{q1_y:'Healthy controls being homozygous makes severe recessive pathogenicity highly unlikely.',q1_n:'Correct answer highlighted.',q2_y:'SpliceAI is the standard deep-learning splice predictor, more specific than generic CADD/SIFT.',q2_n:'Correct answer highlighted.',q3_y:'stop_gained and frameshift are loss-of-function — Sequence Ontology severity HIGH.',q3_n:'Correct answer highlighted.'}};
+document.querySelectorAll('.quiz-q').forEach((q,qi)=>{const ans=+q.dataset.answer;q.querySelectorAll('.quiz-opt').forEach(o=>{o.addEventListener('click',()=>{if(q.classList.contains('answered'))return;q.classList.add('answered');const fb=document.getElementById('fb'+(qi+1));const ok=+o.dataset.idx===ans;o.classList.add(ok?'correct':'wrong');if(!ok)q.querySelectorAll('.quiz-opt')[ans].classList.add('correct');const L=I18n.get();fb.className='quiz-feedback show '+(ok?'correct-fb':'wrong-fb');fb.textContent=(ok?'✅ ':'❌ ')+(QF[L]['q'+(qi+1)+'_'+(ok?'y':'n')]||'');});});});
+</script>
+</body></html>

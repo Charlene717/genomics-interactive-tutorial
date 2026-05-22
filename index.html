@@ -1,0 +1,56 @@
+<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Genomics Interactive Tutorial</title>
+<meta name="description" content="Comprehensive bilingual interactive tutorial on genomics — NGS workflow, variant calling, RNA-seq, ChIP-seq/ATAC-seq, methylation, GWAS, and pipelines.">
+<link rel="stylesheet" href="styles.css"></head><body>
+<nav class="top-nav"><div class="top-nav-inner">
+  <a href="index.html" class="top-nav-brand"><span>🧬</span> <span data-zh="基因體學教學" data-en="Genomics Tutorial">基因體學教學</span></a>
+  <ul class="top-nav-links"><li><a href="sequencing.html">Seq</a></li><li><a href="qc.html">QC</a></li><li><a href="alignment.html">Align</a></li><li><a href="postalign.html">PostAlign</a></li><li><a href="variant-calling.html">VarCall</a></li><li><a href="annotation.html">Annot</a></li><li><a href="sv-cnv.html">SV/CNV</a></li><li><a href="rnaseq.html">RNA-seq</a></li><li><a href="chip-atac.html">ChIP/ATAC</a></li><li><a href="methylation.html">Methyl</a></li><li><a href="gwas.html">GWAS</a></li><li><a href="popgen.html">PopGen</a></li><li><a href="enrichment.html">Enrich</a></li><li><a href="workflow.html">Pipeline</a></li><li><a href="references/index.html" data-zh="📚 參考資料" data-en="📚 References">📚 參考資料</a></li></ul>
+</div></nav>
+<header class="hub-hero"><div style="position:relative;z-index:1;">
+<h1 data-zh="基因體學互動式教學" data-en="Genomics Interactive Tutorial">基因體學互動式教學</h1>
+<p data-lang="zh">從 FASTQ 到生物學洞見——14 個步驟帶你掌握 DNA/RNA 定序與多體學分析的核心流程，搭配互動模擬、Bash/R/Python/Nextflow 程式碼範例。</p>
+<p data-lang="en">From FASTQ to biological insights — master DNA/RNA sequencing and multi-omics analysis in 14 steps, with interactive simulations and Bash/R/Python/Nextflow code examples.</p>
+</div></header>
+
+<h2 class="hub-section-title"><span>01</span> <span data-zh="核心分析流程 (Core NGS Pipeline)" data-en="Core NGS Pipeline">核心分析流程 (Core NGS Pipeline)</span></h2>
+<div class="hub-steps-grid">
+  <a href="sequencing.html" class="hub-card"><div class="hub-emoji">🧬</div><span class="step-num">Step 1</span><h3 data-zh="定序技術與 FASTQ" data-en="Sequencing & FASTQ">定序技術與 FASTQ</h3><p data-lang="zh">比較 Illumina、Nanopore、PacBio HiFi 等平台；解析 FASTQ 格式與 Phred 品質分數。</p><p data-lang="en">Compare Illumina, Nanopore, and PacBio HiFi platforms. Decode FASTQ format and Phred quality scores.</p></a>
+  <a href="qc.html" class="hub-card"><div class="hub-emoji">🧪</div><span class="step-num">Step 2</span><h3 data-zh="品質管控與 Trimming" data-en="QC & Trimming">品質管控與 Trimming</h3><p data-lang="zh">FastQC、MultiQC、fastp/Trim Galore 移除 adapter 與低品質鹼基。</p><p data-lang="en">FastQC, MultiQC, fastp/Trim Galore — remove adapters and low-quality bases.</p></a>
+  <a href="alignment.html" class="hub-card"><div class="hub-emoji">🎯</div><span class="step-num">Step 3</span><h3 data-zh="序列比對 (Alignment)" data-en="Read Alignment">序列比對 (Alignment)</h3><p data-lang="zh">BWA-MEM2、Bowtie2、STAR、Minimap2 比較；SAM/BAM 格式與 CIGAR。</p><p data-lang="en">BWA-MEM2, Bowtie2, STAR, Minimap2 comparison. SAM/BAM format and CIGAR strings.</p></a>
+  <a href="postalign.html" class="hub-card"><div class="hub-emoji">🔧</div><span class="step-num">Step 4</span><h3 data-zh="比對後處理" data-en="Post-Alignment">比對後處理</h3><p data-lang="zh">MarkDuplicates、BQSR 重新校正、samtools sort/index — 為變異呼叫鋪路。</p><p data-lang="en">MarkDuplicates, BQSR recalibration, samtools sort/index — prepare for variant calling.</p></a>
+  <a href="variant-calling.html" class="hub-card"><div class="hub-emoji">🔬</div><span class="step-num">Step 5</span><h3 data-zh="變異呼叫 (SNV/Indel)" data-en="Variant Calling (SNV/Indel)">變異呼叫 (SNV/Indel)</h3><p data-lang="zh">GATK HaplotypeCaller、DeepVariant、bcftools；GVCF 與 joint genotyping。</p><p data-lang="en">GATK HaplotypeCaller, DeepVariant, bcftools. GVCF and joint genotyping workflows.</p></a>
+  <a href="annotation.html" class="hub-card"><div class="hub-emoji">🏷️</div><span class="step-num">Step 6</span><h3 data-zh="變異註釋與過濾" data-en="Variant Annotation">變異註釋與過濾</h3><p data-lang="zh">VEP、ANNOVAR、SnpEff、ClinVar、gnomAD — 將位點轉化為生物學意義。</p><p data-lang="en">VEP, ANNOVAR, SnpEff, ClinVar, gnomAD — turn coordinates into biological meaning.</p></a>
+  <a href="sv-cnv.html" class="hub-card"><div class="hub-emoji">🧱</div><span class="step-num">Step 7</span><h3 data-zh="結構變異與 CNV" data-en="Structural Variants & CNV">結構變異與 CNV</h3><p data-lang="zh">Manta、Delly、Sniffles2 偵測 DEL/DUP/INV/INS；CNVkit/gCNV 計算劑量改變。</p><p data-lang="en">Manta, Delly, Sniffles2 detect DEL/DUP/INV/INS. CNVkit/gCNV measure dosage changes.</p></a>
+</div>
+
+<h2 class="hub-section-title"><span>02</span> <span data-zh="多體學模組 (Multi-omics)" data-en="Multi-omics Modules">多體學模組 (Multi-omics)</span></h2>
+<div class="hub-steps-grid">
+  <a href="rnaseq.html" class="hub-card"><div class="hub-emoji">📈</div><span class="step-num">Step 8</span><h3 data-zh="Bulk RNA-seq 差異表達" data-en="Bulk RNA-seq DE">Bulk RNA-seq 差異表達</h3><p data-lang="zh">STAR/HISAT2/Salmon 計數；DESeq2、edgeR、limma-voom 差異分析。</p><p data-lang="en">STAR/HISAT2/Salmon quantification. DESeq2, edgeR, limma-voom differential analysis.</p></a>
+  <a href="chip-atac.html" class="hub-card"><div class="hub-emoji">🧶</div><span class="step-num">Step 9</span><h3 data-zh="ChIP-seq 與 ATAC-seq" data-en="ChIP-seq / ATAC-seq">ChIP-seq 與 ATAC-seq</h3><p data-lang="zh">MACS3 peak calling；ATAC 雙端 fragment 處理；CUT&Tag、CUT&RUN 進階。</p><p data-lang="en">MACS3 peak calling. ATAC paired-end fragment handling. CUT&Tag/CUT&RUN advanced methods.</p></a>
+  <a href="methylation.html" class="hub-card"><div class="hub-emoji">🧬</div><span class="step-num">Step 10</span><h3 data-zh="DNA 甲基化與表觀基因體" data-en="Methylation & Epigenomics">DNA 甲基化與表觀基因體</h3><p data-lang="zh">WGBS、RRBS、Bismark 比對；methylKit DMR；Hi-C 與 3D genome 簡介。</p><p data-lang="en">WGBS, RRBS, Bismark alignment. methylKit DMR. Hi-C and 3D genome primer.</p></a>
+</div>
+
+<h2 class="hub-section-title"><span>03</span> <span data-zh="群體與功能分析" data-en="Population & Functional Analysis">群體與功能分析</span></h2>
+<div class="hub-steps-grid">
+  <a href="gwas.html" class="hub-card"><div class="hub-emoji">🌍</div><span class="step-num">Step 11</span><h3 data-zh="GWAS 全基因組關聯" data-en="GWAS">GWAS 全基因組關聯</h3><p data-lang="zh">PLINK 2.0、REGENIE、SAIGE；Manhattan / QQ plot；imputation 與 PRS。</p><p data-lang="en">PLINK 2.0, REGENIE, SAIGE. Manhattan/QQ plots. Imputation and polygenic risk scores.</p></a>
+  <a href="popgen.html" class="hub-card"><div class="hub-emoji">🧭</div><span class="step-num">Step 12</span><h3 data-zh="群體遺傳學" data-en="Population Genetics">群體遺傳學</h3><p data-lang="zh">PCA、ADMIXTURE、Fst、Tajima's D、自然選擇偵測；scikit-allel 範例。</p><p data-lang="en">PCA, ADMIXTURE, Fst, Tajima's D, selection scans. scikit-allel walkthrough.</p></a>
+  <a href="enrichment.html" class="hub-card"><div class="hub-emoji">📊</div><span class="step-num">Step 13</span><h3 data-zh="功能富集分析" data-en="Functional Enrichment">功能富集分析</h3><p data-lang="zh">GO、KEGG、Reactome；ORA vs GSEA；clusterProfiler 與 gProfiler 視覺化。</p><p data-lang="en">GO, KEGG, Reactome. ORA vs GSEA. clusterProfiler and gProfiler visualization.</p></a>
+</div>
+
+<h2 class="hub-section-title"><span>04</span> <span data-zh="工程化與工作流" data-en="Engineering & Pipelines">工程化與工作流</span></h2>
+<div class="hub-steps-grid">
+  <a href="workflow.html" class="hub-card"><div class="hub-emoji">⚙️</div><span class="step-num">Step 14</span><h3 data-zh="工作流自動化" data-en="Workflow Automation">工作流自動化</h3><p data-lang="zh">Nextflow vs Snakemake；nf-core/sarek；Docker/Singularity；HPC 與雲端佈署。</p><p data-lang="en">Nextflow vs Snakemake. nf-core/sarek. Docker/Singularity. HPC and cloud deployment.</p></a>
+</div>
+
+<h2 class="hub-section-title"><span>05</span> <span data-zh="延伸學習與資源" data-en="Further Learning & Resources">延伸學習與資源</span></h2>
+<div class="hub-steps-grid">
+  <a href="references/index.html" class="hub-card"><div class="hub-emoji">📚</div><span class="step-num">References</span><h3 data-zh="參考資料佐證" data-en="References & Citations">參考資料佐證</h3><p data-lang="zh">14 主題的學術論文、官方文件、Best Practices 綜述與基因體學資料庫整理，附 DOI 連結與疑義注記。</p><p data-lang="en">Academic papers, official docs, best-practice reviews, and genomics databases for all 14 topics — with DOI links and errata notes.</p></a>
+  <a href="genomics-quiz/index.html" class="hub-card" target="_blank" rel="noopener"><div class="hub-emoji">📝</div><span class="step-num">Quiz</span><h3 data-zh="互動式考題" data-en="Interactive Quiz">互動式考題</h3><p data-lang="zh">涵蓋 14 主題的單選、多選、是非題；內建練習與考試模式、錯題複習、多使用者進度。</p><p data-lang="en">Single-choice, multi-select, and true/false questions across all 14 topics, with practice/exam modes, wrong-answer review, and multi-user progress tracking.</p></a>
+  <a href="https://gatk.broadinstitute.org/hc/en-us/sections/360007226651-Best-Practices-Workflows" target="_blank" rel="noopener" class="hub-card"><div class="hub-emoji">📘</div><span class="step-num">External</span><h3 data-zh="GATK Best Practices" data-en="GATK Best Practices">GATK Best Practices</h3><p data-lang="zh">Broad Institute 維護的 germline / somatic 工作流參考文件，含 WGS、WES、RNA-seq 變異。</p><p data-lang="en">Broad Institute's reference workflows for germline/somatic analysis — WGS, WES, RNA-seq variants.</p></a>
+  <a href="https://nf-co.re/" target="_blank" rel="noopener" class="hub-card"><div class="hub-emoji">🌊</div><span class="step-num">External</span><h3 data-zh="nf-core Pipelines" data-en="nf-core Pipelines">nf-core Pipelines</h3><p data-lang="zh">社群開發的 Nextflow 標準化 pipelines；sarek、rnaseq、atacseq、chipseq 等。</p><p data-lang="en">Community-curated standardized Nextflow pipelines — sarek, rnaseq, atacseq, chipseq, and more.</p></a>
+  <a href="https://humanpangenome.org/" target="_blank" rel="noopener" class="hub-card"><div class="hub-emoji">🌐</div><span class="step-num">External</span><h3 data-zh="人類泛基因組計畫" data-en="Human Pangenome (HPRC)">人類泛基因組計畫</h3><p data-lang="zh">HPRC Release 2（2025-05）已釋出 200+ 個 phased haplotype assemblies，正逐步取代單一參考。</p><p data-lang="en">HPRC Release 2 (2025-05) released 200+ phased haplotype assemblies, gradually replacing the single reference.</p></a>
+</div>
+<div style="height:60px"></div>
+<footer class="site-footer">© Charlene — Genomics Interactive Tutorial</footer>
+<script src="i18n.js"></script>
+</body></html>

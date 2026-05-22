@@ -1,0 +1,375 @@
+<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Step 14: Workflow Automation — Genomics Tutorial</title>
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+</head><body>
+<nav class="top-nav"><div class="top-nav-inner">
+  <a href="index.html" class="top-nav-brand"><span>🧬</span> <span data-zh="基因體學教學" data-en="Genomics Tutorial">基因體學教學</span></a>
+  <ul class="top-nav-links"><li><a href="sequencing.html">Seq</a></li><li><a href="qc.html">QC</a></li><li><a href="alignment.html">Align</a></li><li><a href="postalign.html">PostAlign</a></li><li><a href="variant-calling.html">VarCall</a></li><li><a href="annotation.html">Annot</a></li><li><a href="sv-cnv.html">SV/CNV</a></li><li><a href="rnaseq.html">RNA-seq</a></li><li><a href="chip-atac.html">ChIP/ATAC</a></li><li><a href="methylation.html">Methyl</a></li><li><a href="gwas.html">GWAS</a></li><li><a href="popgen.html">PopGen</a></li><li><a href="enrichment.html">Enrich</a></li><li><a href="workflow.html" class="active">Pipeline</a></li>
+    <li><a href="references/index.html" data-zh="📚 參考資料" data-en="📚 References">📚 參考資料</a></li>
+  </ul>
+</div></nav>
+<div class="progress-bar-container"><div class="progress-bar" id="progressBar"></div></div>
+<header class="page-hero"><div class="step-badge">STEP 14 / 14</div>
+<h1 data-zh="工作流自動化 (Workflow Automation)" data-en="Workflow Automation">工作流自動化</h1>
+<p class="subtitle" data-lang="zh">Nextflow vs Snakemake、容器化、可重現性、HPC 與雲端佈署。</p>
+<p class="subtitle" data-lang="en">Nextflow vs Snakemake, containers, reproducibility, HPC and cloud deployment.</p>
+</header>
+<main class="content-wrap">
+
+<section class="section">
+<div class="section-label" data-zh="概覽" data-en="OVERVIEW">概覽</div>
+<h2 data-zh="為什麼需要 workflow 系統？" data-en="Why workflows matter">為什麼需要 workflow 系統？</h2>
+<div data-lang="zh">
+<p>一條 NGS pipeline 動輒 10–30 個步驟，每步驟跑數小時到數天、依賴特定軟體版本、需要 GB 級記憶體與 HPC 排程。<strong>用 shell 腳本</strong> 雖然能跑，但失敗時要從頭重跑、無法平行多樣本、不易在新機器/雲端重現。</p>
+<p>Workflow 系統解決這些問題：<strong>自動依賴管理（DAG）、平行化、失敗 resume、容器化執行、HPC/雲端 portable、版本控制與 audit trail</strong>。生物資訊兩大主流是 <strong>Nextflow</strong>（Groovy DSL，企業/雲端主導；2024 citation share ~43%）與 <strong>Snakemake</strong>（Python-based，學術社群忠實使用者，17%）。</p>
+</div>
+<div data-lang="en">
+<p>An NGS pipeline easily has 10–30 steps, each taking hours to days, depending on specific software versions and requiring GB-scale memory + HPC scheduling. <strong>Plain shell scripts</strong> can run them, but failures require full restart, no parallelism, and reproducibility on new machines/cloud is painful.</p>
+<p>Workflow systems solve all this: <strong>automatic dependency management (DAG), parallelism, failure resume, containerized execution, HPC/cloud portability, version control, audit trail</strong>. The two dominant systems are <strong>Nextflow</strong> (Groovy DSL, ~43% citation share in 2024, dominant in enterprise/cloud) and <strong>Snakemake</strong> (Python-based, 17%, loyal academic following).</p>
+</div>
+<div class="callout tip"><span class="callout-icon">💡</span><div>
+<span data-lang="zh"><strong>核心原則：</strong>2025 主流推薦——<strong>不要從零寫</strong>，直接用 <strong>nf-core 社群 pipeline</strong>。sarek（變異）、rnaseq、chipseq、atacseq、methylseq、ampliseq 都是 community-tested、CI 跑過、雲端 ready。</span>
+<span data-lang="en"><strong>Core principle:</strong> 2025 best practice — <strong>don't write from scratch</strong>; use the <strong>nf-core community pipelines</strong>. sarek (variants), rnaseq, chipseq, atacseq, methylseq, ampliseq are all community-tested, CI-validated, and cloud-ready.</span>
+</div></div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="工具比較" data-en="TOOL COMPARISON">工具比較</div>
+<h2 data-zh="一、Nextflow vs Snakemake" data-en="I. Nextflow vs Snakemake">一、Nextflow vs Snakemake</h2>
+<table class="comp-table">
+<thead><tr><th></th><th>Nextflow (DSL2)</th><th>Snakemake</th></tr></thead>
+<tbody>
+<tr><td data-zh="語法" data-en="Syntax"><strong>語法</strong></td><td data-lang="zh">Groovy DSL，dataflow 模型</td><td data-lang="zh">Python，rules-based（類 Makefile）</td><td data-lang="en">Groovy DSL, dataflow model</td><td data-lang="en">Python, rules-based (Makefile-like)</td></tr>
+<tr><td data-zh="平行化" data-en="Parallelism"><strong>平行化</strong></td><td data-lang="zh">天生 channel-based，自動 fan-out / fan-in</td><td data-lang="zh">依 wildcard 展開推導，可平行</td><td data-lang="en">Native channel-based; auto fan-out/fan-in</td><td data-lang="en">Wildcard expansion drives parallelism</td></tr>
+<tr><td data-zh="HPC/雲端支援" data-en="HPC/Cloud"><strong>HPC/雲端</strong></td><td data-lang="zh">SLURM/PBS/LSF/AWS Batch/Azure/Google Cloud 一致 API</td><td data-lang="zh">SLURM/cluster；雲支援較弱但 Tibanna/Google 可選</td><td data-lang="en">Unified API for SLURM/PBS/LSF/AWS Batch/Azure/GCP</td><td data-lang="en">Strong cluster support; cloud weaker (Tibanna, Google option)</td></tr>
+<tr><td data-zh="容器" data-en="Containers"><strong>容器</strong></td><td>Docker/Singularity/Apptainer/Conda</td><td>Docker/Singularity/Conda</td></tr>
+<tr><td data-zh="社群生態" data-en="Community"><strong>社群生態</strong></td><td>nf-core（120+ pipeline）</td><td data-lang="zh">snakemake-workflows（少數 pipeline）</td><td data-lang="en">nf-core (120+ pipelines)</td><td data-lang="en">snakemake-workflows (fewer pipelines)</td></tr>
+<tr><td data-zh="學習曲線" data-en="Learning curve"><strong>學習曲線</strong></td><td data-lang="zh">Groovy 新手較陡，DSL 設計清楚</td><td data-lang="zh">Python 背景者上手快</td><td data-lang="en">Steeper for Groovy newcomers, clean DSL</td><td data-lang="en">Faster for Python users</td></tr>
+<tr><td data-zh="2024 citation share" data-en="2024 citation share"><strong>citation share</strong></td><td>~43%（上升）</td><td>~17%（下降）</td></tr>
+</tbody></table>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="互動模擬" data-en="INTERACTIVE">互動模擬</div>
+<h2 data-zh="二、Pipeline 平行化 vs 序列化 速度比較" data-en="II. Parallel vs Serial Pipeline Speedup">二、Pipeline 平行化 vs 序列化 速度比較</h2>
+<div data-lang="zh"><p>workflow 系統最大紅利是自動<strong>平行化</strong>。拖滑桿調整樣本數與每樣本步驟時間，看序列 vs 平行的時間差。</p></div>
+<div data-lang="en"><p>The biggest payoff from workflow systems is automatic <strong>parallelism</strong>. Drag sliders to vary sample count and per-step time, then compare serial vs parallel runtime.</p></div>
+
+<div class="interactive-panel">
+<div class="sim-stats">
+  <span class="sim-stat fail" id="serialTime">—</span>
+  <span class="sim-stat pass" id="parTime">—</span>
+  <span class="sim-stat pass" id="speedup">—</span>
+</div>
+<div class="slider-group"><label><span data-zh="樣本數" data-en="Number of samples">樣本數</span> <span id="valS">20</span></label><input type="range" id="slS" min="1" max="200" value="20" step="1"></div>
+<div class="slider-group"><label><span data-zh="平行 worker 數（CPU/節點）" data-en="Parallel workers (CPUs/nodes)">並行 workers</span> <span id="valW">8</span></label><input type="range" id="slW" min="1" max="64" value="8" step="1"></div>
+<div class="slider-group"><label><span data-zh="每樣本流程時間（小時）" data-en="Per-sample pipeline hours">每樣本時間</span> <span id="valT">6</span> h</label><input type="range" id="slT" min="1" max="24" value="6" step="1"></div>
+<div class="chart-container"><canvas id="wfChart"></canvas></div>
+<p style="font-size:.82rem;color:var(--c-ink-muted);text-align:center;" data-lang="zh">X: workers | Y: 完成所有樣本所需時間（h）</p>
+<p style="font-size:.82rem;color:var(--c-ink-muted);text-align:center;" data-lang="en">X: workers | Y: total time to finish all samples (h)</p>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="主流 pipelines" data-en="nf-core">主流 pipelines</h2>
+<h2 data-zh="三、nf-core 主流 pipeline 一覽" data-en="III. Key nf-core Pipelines">三、nf-core 主流 pipeline 一覽</h2>
+<div class="card-grid cols-2">
+<div class="card"><h4>🔬 nf-core/sarek (variant calling)</h4>
+<div data-lang="zh"><p>當前版本 <strong>3.8.1</strong>。<strong>支援：</strong>germline、tumor-only、tumor/normal paired；SNV/Indel (GATK/DeepVariant/Strelka2)、SV (Manta/Delly/TIDDIT)、CNV (CNVkit/AscatNGS)、MSI、HLA typing。<strong>適用：</strong>WGS/WES/panel-seq 變異呼叫端對端流程。</p></div>
+<div data-lang="en"><p>Current <strong>3.8.1</strong>. <strong>Supports:</strong> germline, tumor-only, tumor/normal paired; SNV/Indel (GATK/DeepVariant/Strelka2), SV (Manta/Delly/TIDDIT), CNV (CNVkit/AscatNGS), MSI, HLA typing. <strong>Use:</strong> end-to-end WGS/WES/panel variant calling.</p></div>
+</div>
+<div class="card"><h4>📈 nf-core/rnaseq</h4>
+<div data-lang="zh"><p>RNA-seq alignment + quantification + QC。<strong>支援：</strong>STAR/HISAT2 + Salmon、featureCounts/RSEM；輸出 gene/transcript counts、TPM、MultiQC report；可直接餵 DESeq2。</p></div>
+<div data-lang="en"><p>RNA-seq alignment + quantification + QC. <strong>Supports:</strong> STAR/HISAT2 + Salmon, featureCounts/RSEM; outputs gene/transcript counts, TPM, MultiQC report; ready to feed DESeq2.</p></div>
+</div>
+<div class="card"><h4>🧶 nf-core/chipseq & atacseq</h4>
+<div data-lang="zh"><p>從 FASTQ 到 peak。<strong>包含：</strong>BWA/Bowtie2 比對、MarkDuplicates、MACS3 peak calling、HOMER motif、differential binding (DiffBind)、IGV track、MultiQC。</p></div>
+<div data-lang="en"><p>FASTQ to peaks. <strong>Includes:</strong> BWA/Bowtie2 alignment, MarkDuplicates, MACS3 peaks, HOMER motifs, differential binding (DiffBind), IGV tracks, MultiQC.</p></div>
+</div>
+<div class="card"><h4>🧬 nf-core/methylseq</h4>
+<div data-lang="zh"><p>WGBS / RRBS / EM-seq pipeline。<strong>支援：</strong>Bismark 或 bwa-meth 比對、CpG methylation extraction、QC（BSseq concordance）、MethylDackel 或 methylKit downstream。</p></div>
+<div data-lang="en"><p>WGBS / RRBS / EM-seq pipeline. <strong>Supports:</strong> Bismark or bwa-meth alignment, CpG extraction, BSseq concordance QC, MethylDackel or methylKit downstream.</p></div>
+</div>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="可重現性" data-en="REPRODUCIBILITY">可重現性</div>
+<h2 data-zh="四、可重現性的四大支柱" data-en="IV. Four Pillars of Reproducibility">四、可重現性的四大支柱</h2>
+<div class="workflow">
+<div class="workflow-step" data-step="1"><h4 data-zh="容器化 (Docker / Singularity / Apptainer)" data-en="Containers">1. 容器化 (Docker / Singularity / Apptainer)</h4>
+<div data-lang="zh"><p>把工具與其完整環境打包進不可變的 image。<strong>HPC 環境通常用 Singularity / Apptainer</strong>（無 root）；Docker 用於本地/雲端。每個 nf-core process 都對應特定 BioContainer image。</p></div>
+<div data-lang="en"><p>Package tools + full environment into immutable images. <strong>HPC commonly uses Singularity / Apptainer</strong> (rootless); Docker for local/cloud. Each nf-core process maps to a specific BioContainer image.</p></div>
+</div>
+<div class="workflow-step" data-step="2"><h4 data-zh="版本鎖定 (semantic versioning)" data-en="Version pinning">2. 版本鎖定</h4>
+<div data-lang="zh"><p>workflow code 用 git tag (<code>-r 3.14.0</code>)；container image digest 鎖定（<code>@sha256:...</code>）；reference genome 標明 source + checksum。</p></div>
+<div data-lang="en"><p>Pin workflow code with git tags (<code>-r 3.14.0</code>); pin container image digests (<code>@sha256:...</code>); reference genome source + checksum.</p></div>
+</div>
+<div class="workflow-step" data-step="3"><h4 data-zh="Reference data 標準化" data-en="Standardized reference data">3. Reference data 標準化</h4>
+<div data-lang="zh"><p>使用 iGenomes / GENCODE 標準 reference；輸入 samplesheet 對應 SRA / ENA accession 而非本地 file。</p></div>
+<div data-lang="en"><p>Use iGenomes / GENCODE standard references; samplesheets reference SRA / ENA accessions rather than local files.</p></div>
+</div>
+<div class="workflow-step" data-step="4"><h4 data-zh="記錄與 audit trail" data-en="Logs and audit trail">4. 記錄與 audit trail</h4>
+<div data-lang="zh"><p>Nextflow 自動產 <code>.nextflow.log</code>、<code>trace.txt</code>、<code>report.html</code>，記錄每個 process 的執行時間、記憶體、退出碼。發表時建議附這些到 supplementary。</p></div>
+<div data-lang="en"><p>Nextflow auto-generates <code>.nextflow.log</code>, <code>trace.txt</code>, <code>report.html</code> recording per-process runtime, memory, exit codes. Recommended for paper supplementary materials.</p></div>
+</div>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="決策引導" data-en="DECISION GUIDE">決策引導</div>
+<h2 data-zh="五、佈署環境決策" data-en="V. Deployment Decisions">五、佈署環境決策</h2>
+<div class="decision-tree">
+<h4>🌳 <span data-zh="跑在哪裡？" data-en="Where to run?">跑在哪裡？</span></h4>
+<div data-lang="zh">
+<div class="dt-node"><span class="dt-q">Q1:</span><div>單樣本快速測試？<span class="dt-arrow">→ 是 →</span> <strong>本地 Docker / Conda</strong>（<code>-profile docker</code>）</div></div>
+<div class="dt-node"><span class="dt-q">Q2:</span><div>機構有 HPC（SLURM）？<span class="dt-arrow">→ 是 →</span> <strong>Singularity / Apptainer + SLURM executor</strong>，配置 <code>nextflow.config</code> 加 <code>process.executor = 'slurm'</code></div></div>
+<div class="dt-node"><span class="dt-q">Q3:</span><div>需要彈性擴展、無 HPC？<span class="dt-arrow">→ 是 →</span> <strong>AWS Batch / Google Batch / Azure Batch</strong>（nf-core 直接支援）</div></div>
+<div class="dt-node"><span class="dt-q">Q4:</span><div>需要 GUI / 全託管？<span class="dt-arrow">→ 是 →</span> <strong>Seqera Platform</strong>（Nextflow 的 Cloud 平台，前身 Tower）；學術免費 tier</div></div>
+<div class="dt-node"><span class="dt-q">Q5:</span><div>大型樣本與 cost 敏感？<span class="dt-arrow">→ 是 →</span> 用 <strong>AWS Batch + Spot</strong> 或 <strong>FSx Lustre</strong> 大幅降低 I/O 成本；nf-core/sarek 1000 樣本 WGS 在 spot 約 $40/sample</div></div>
+</div>
+<div data-lang="en">
+<div class="dt-node"><span class="dt-q">Q1:</span><div>Quick single-sample test? <span class="dt-arrow">→ Yes →</span> <strong>Local Docker / Conda</strong> (<code>-profile docker</code>)</div></div>
+<div class="dt-node"><span class="dt-q">Q2:</span><div>Institutional HPC (SLURM)? <span class="dt-arrow">→ Yes →</span> <strong>Singularity / Apptainer + SLURM executor</strong>; set <code>process.executor = 'slurm'</code> in <code>nextflow.config</code></div></div>
+<div class="dt-node"><span class="dt-q">Q3:</span><div>Need elastic scale, no HPC? <span class="dt-arrow">→ Yes →</span> <strong>AWS Batch / Google Batch / Azure Batch</strong> (nf-core supports natively)</div></div>
+<div class="dt-node"><span class="dt-q">Q4:</span><div>Need GUI / fully-managed? <span class="dt-arrow">→ Yes →</span> <strong>Seqera Platform</strong> (Nextflow's cloud platform, formerly Tower); academic free tier</div></div>
+<div class="dt-node"><span class="dt-q">Q5:</span><div>Large cohorts and cost-sensitive? <span class="dt-arrow">→ Yes →</span> Use <strong>AWS Batch + Spot</strong> or <strong>FSx Lustre</strong> to cut I/O cost; nf-core/sarek 1000-sample WGS on spot ≈ $40/sample</div></div>
+</div>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="程式碼" data-en="CODE">程式碼</div>
+<h2 data-zh="實作範例" data-en="Code Examples">實作範例</h2>
+<div class="code-tabs">
+<div class="code-tab-btns">
+  <button class="code-tab-btn active" onclick="switchTab(this,'nf1')">Nextflow DSL2</button>
+  <button class="code-tab-btn" onclick="switchTab(this,'sm1')">Snakemake</button>
+  <button class="code-tab-btn" onclick="switchTab(this,'b1')">Bash (nf-core)</button>
+  <button class="code-tab-btn" onclick="switchTab(this,'cfg')">nextflow.config</button>
+</div>
+<div class="code-tab-content active" id="nf1"><pre><span class="comment">// --- Nextflow DSL2: 簡易 NGS pipeline ---</span>
+<span class="kw">nextflow.enable.dsl</span> = <span class="num">2</span>
+
+<span class="kw">process</span> FASTP {
+  tag <span class="str">"$meta.id"</span>
+  conda <span class="str">"bioconda::fastp=0.23.4"</span>
+  container <span class="str">"quay.io/biocontainers/fastp:0.23.4--h5f740d0_0"</span>
+  input:  tuple val(meta), path(reads)
+  output: tuple val(meta), path(<span class="str">"*_trim_*.fq.gz"</span>), emit: trimmed
+          path <span class="str">"*.json"</span>, emit: json
+  script:
+  <span class="str">"""
+  fastp -i ${reads[0]} -I ${reads[1]} \\
+        -o ${meta.id}_trim_R1.fq.gz -O ${meta.id}_trim_R2.fq.gz \\
+        -j ${meta.id}.json -h ${meta.id}.html --thread ${task.cpus}
+  """</span>
+}
+
+<span class="kw">process</span> BWAMEM2 {
+  tag <span class="str">"$meta.id"</span>
+  cpus <span class="num">16</span>; memory <span class="str">'32 GB'</span>
+  input:  tuple val(meta), path(reads); path index
+  output: tuple val(meta), path(<span class="str">"*.sorted.bam"</span>), path(<span class="str">"*.bai"</span>)
+  script:
+  <span class="str">"""
+  bwa-mem2 mem -t ${task.cpus} ${index}/hg38 ${reads[0]} ${reads[1]} \\
+    | samtools sort -@ 4 -o ${meta.id}.sorted.bam -
+  samtools index ${meta.id}.sorted.bam
+  """</span>
+}
+
+<span class="kw">workflow</span> {
+  reads_ch = Channel.fromFilePairs(<span class="str">"data/*_{R1,R2}.fq.gz"</span>)
+            .map { id, files -&gt; [[id: id], files] }
+  FASTP(reads_ch)
+  BWAMEM2(FASTP.out.trimmed, file(<span class="str">"ref/bwa_idx"</span>))
+}</pre></div>
+
+<div class="code-tab-content" id="sm1"><pre><span class="comment"># --- Snakemake: 同樣的 pipeline ---</span>
+SAMPLES = [<span class="str">"S1"</span>, <span class="str">"S2"</span>, <span class="str">"S3"</span>]
+
+<span class="kw">rule</span> all:
+    input: <span class="func">expand</span>(<span class="str">"bam/{sample}.sorted.bam.bai"</span>, sample=SAMPLES)
+
+<span class="kw">rule</span> fastp:
+    input:  r1 = <span class="str">"data/{sample}_R1.fq.gz"</span>,
+            r2 = <span class="str">"data/{sample}_R2.fq.gz"</span>
+    output: r1 = <span class="str">"trim/{sample}_R1.fq.gz"</span>,
+            r2 = <span class="str">"trim/{sample}_R2.fq.gz"</span>,
+            json = <span class="str">"qc/{sample}.json"</span>
+    threads: <span class="num">8</span>
+    container: <span class="str">"docker://quay.io/biocontainers/fastp:0.23.4--h5f740d0_0"</span>
+    shell:  <span class="str">"""
+            fastp -i {input.r1} -I {input.r2} \\
+                  -o {output.r1} -O {output.r2} \\
+                  -j {output.json} --thread {threads}
+            """</span>
+
+<span class="kw">rule</span> bwa_align:
+    input:  r1=<span class="str">"trim/{sample}_R1.fq.gz"</span>, r2=<span class="str">"trim/{sample}_R2.fq.gz"</span>,
+            idx=<span class="str">"ref/bwa_idx/hg38"</span>
+    output: bam=<span class="str">"bam/{sample}.sorted.bam"</span>, bai=<span class="str">"bam/{sample}.sorted.bam.bai"</span>
+    threads: <span class="num">16</span>
+    container: <span class="str">"docker://quay.io/biocontainers/bwa-mem2:2.2.1"</span>
+    shell:  <span class="str">"""
+            bwa-mem2 mem -t {threads} {input.idx} {input.r1} {input.r2} \\
+              | samtools sort -@ 4 -o {output.bam} -
+            samtools index {output.bam}
+            """</span>
+
+<span class="comment"># 跑：snakemake --use-singularity --cores 32 --resources mem_mb=64000</span></pre></div>
+
+<div class="code-tab-content" id="b1"><pre><span class="comment"># --- nf-core/sarek 一行跑完 WGS variant calling ---</span>
+nextflow run nf-core/sarek -r 3.8.1 \
+   --input samplesheet.csv \
+   --outdir results/ \
+   --genome GATK.GRCh38 \
+   --tools haplotypecaller,strelka,manta,deepvariant \
+   --joint_germline \
+   -profile docker
+
+<span class="comment"># samplesheet.csv 範例:</span>
+<span class="comment"># patient,sample,lane,fastq_1,fastq_2</span>
+<span class="comment"># P1,S1,L001,S1_R1.fq.gz,S1_R2.fq.gz</span>
+<span class="comment"># P1,S2,L001,S2_R1.fq.gz,S2_R2.fq.gz</span>
+
+<span class="comment"># --- nf-core/rnaseq ---</span>
+nextflow run nf-core/rnaseq -r 3.14.0 \
+   --input samples.csv --outdir rnaseq_results/ \
+   --genome GRCh38 --aligner star_salmon \
+   -profile singularity
+
+<span class="comment"># --- 在 SLURM 上跑 ---</span>
+nextflow run nf-core/sarek -r 3.8.1 \
+   --input samplesheet.csv --outdir results/ \
+   -profile singularity,slurm \
+   --max_memory <span class="str">'128.GB'</span> --max_cpus <span class="num">32</span>
+
+<span class="comment"># --- 在 AWS Batch 上跑 ---</span>
+nextflow run nf-core/sarek -r 3.8.1 \
+   --input s3://my-bucket/samplesheet.csv \
+   --outdir s3://my-bucket/results/ \
+   -profile awsbatch \
+   -bucket-dir s3://my-bucket/work/ \
+   -resume</pre></div>
+
+<div class="code-tab-content" id="cfg"><pre><span class="comment">// --- nextflow.config (HPC + Singularity + 資源管控) ---</span>
+profiles {
+  slurm {
+    process {
+      executor      = <span class="str">'slurm'</span>
+      queue         = <span class="str">'normal'</span>
+      clusterOptions = <span class="str">'--account=mylab --partition=cpu'</span>
+
+      withLabel: <span class="str">'process_low'</span>    { cpus = <span class="num">2</span>;  memory = <span class="str">'8 GB'</span>;   time = <span class="str">'2h'</span> }
+      withLabel: <span class="str">'process_medium'</span> { cpus = <span class="num">8</span>;  memory = <span class="str">'32 GB'</span>;  time = <span class="str">'8h'</span> }
+      withLabel: <span class="str">'process_high'</span>   { cpus = <span class="num">16</span>; memory = <span class="str">'128 GB'</span>; time = <span class="str">'24h'</span> }
+    }
+    singularity {
+      enabled   = <span class="kw">true</span>
+      autoMounts = <span class="kw">true</span>
+      cacheDir   = <span class="str">'/scratch/singularity_cache'</span>
+    }
+  }
+
+  awsbatch {
+    process.executor  = <span class="str">'awsbatch'</span>
+    process.queue     = <span class="str">'my-batch-queue'</span>
+    aws.region        = <span class="str">'us-east-1'</span>
+    aws.client.maxConnections = <span class="num">20</span>
+  }
+}
+
+<span class="comment">// 資源 retry 策略：失敗的 process 自動升級 memory</span>
+process {
+  errorStrategy = { task.exitStatus <span class="kw">in</span> [<span class="num">137</span>,<span class="num">143</span>] ? <span class="str">'retry'</span> : <span class="str">'finish'</span> }
+  maxRetries    = <span class="num">3</span>
+  memory        = { <span class="num">8</span>.GB * task.attempt }
+}</pre></div>
+</div>
+</section>
+
+<section class="quiz-section">
+<h3>📝 <span data-zh="自我檢測" data-en="Self-Check">自我檢測</span></h3>
+<div class="quiz-q" data-answer="2">
+<p data-lang="zh">1. workflow 系統相對 shell 腳本最大的優勢？</p>
+<p data-lang="en">1. Biggest advantage of workflow systems over shell scripts?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. 跑得比較快</span><span data-lang="en">A. Runs faster</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. 軟體比較新</span><span data-lang="en">B. Newer software</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. 自動依賴管理、平行化、resume、容器化、portable</span><span data-lang="en">C. Automatic dependencies, parallelism, resume, containers, portability</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. 不需要寫程式碼</span><span data-lang="en">D. No code required</span></div>
+</div><div class="quiz-feedback" id="fb1"></div></div>
+
+<div class="quiz-q" data-answer="1">
+<p data-lang="zh">2. HPC 環境通常用哪種容器？</p>
+<p data-lang="en">2. Which container technology is typical for HPC?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. Docker（需要 root）</span><span data-lang="en">A. Docker (requires root)</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. Singularity / Apptainer（無 root，HPC 友善）</span><span data-lang="en">B. Singularity / Apptainer (rootless, HPC-friendly)</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. VirtualBox</span><span data-lang="en">C. VirtualBox</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. WSL</span><span data-lang="en">D. WSL</span></div>
+</div><div class="quiz-feedback" id="fb2"></div></div>
+
+<div class="quiz-q" data-answer="1">
+<p data-lang="zh">3. 為什麼 2025 推薦使用 nf-core 而非自寫 pipeline？</p>
+<p data-lang="en">3. Why does 2025 best practice recommend nf-core over custom pipelines?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. nf-core 比較快</span><span data-lang="en">A. nf-core is faster</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. 社群維護、CI 持續測試、版本鎖定的 container、可重現性高</span><span data-lang="en">B. Community-maintained, CI-tested, pinned containers, high reproducibility</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. nf-core 結果比較準</span><span data-lang="en">C. nf-core gives more accurate results</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. 只能用 nf-core</span><span data-lang="en">D. nf-core is the only option</span></div>
+</div><div class="quiz-feedback" id="fb3"></div></div>
+</section>
+
+<nav class="page-nav">
+<a href="enrichment.html"><span class="nav-dir" data-zh="← 上一步" data-en="← Previous">← 上一步</span><span class="nav-title" data-zh="Step 13: 功能富集分析" data-en="Step 13: Functional Enrichment">Step 13: 功能富集分析</span></a>
+<a href="index.html"><span class="nav-dir" data-zh="🏠 回首頁" data-en="🏠 Home">🏠 回首頁</span><span class="nav-title" data-zh="完成！" data-en="Finished!">完成！</span></a>
+</nav>
+</main>
+<footer class="site-footer">© Charlene — Genomics Interactive Tutorial</footer>
+<script src="i18n.js"></script>
+<script>
+window.addEventListener('scroll',()=>{const h=document.documentElement;document.getElementById('progressBar').style.width=(h.scrollTop/(h.scrollHeight-h.clientHeight))*100+'%';});
+function switchTab(b,id){const p=b.closest('.code-tabs');p.querySelectorAll('.code-tab-btn').forEach(x=>x.classList.remove('active'));p.querySelectorAll('.code-tab-content').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.getElementById(id).classList.add('active');}
+
+const wfChart=new Chart(document.getElementById('wfChart'),{type:'line',data:{labels:[],datasets:[
+  {label:'Serial',data:[],borderColor:'#c0392b',backgroundColor:'rgba(192,57,43,.15)',fill:false,tension:.3,pointRadius:0},
+  {label:'Parallel',data:[],borderColor:'#1a6b5a',backgroundColor:'rgba(26,107,90,.15)',fill:false,tension:.3,pointRadius:0}
+]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{title:{display:true,text:'workers'}},y:{title:{display:true,text:'Total runtime (h)'},beginAtZero:true}}}});
+
+function updateWF(){
+  const N=+document.getElementById('slS').value;
+  const W=+document.getElementById('slW').value;
+  const T=+document.getElementById('slT').value;
+  document.getElementById('valS').textContent=N;
+  document.getElementById('valW').textContent=W;
+  document.getElementById('valT').textContent=T;
+  const serial = N*T;
+  const xs=[], serialArr=[], parArr=[];
+  for(let w=1;w<=64;w++){
+    xs.push(w);
+    serialArr.push(serial);
+    parArr.push(Math.ceil(N/w)*T);
+  }
+  wfChart.data.labels=xs;
+  wfChart.data.datasets[0].data=serialArr;
+  wfChart.data.datasets[1].data=parArr;
+  wfChart.update('none');
+  const par = Math.ceil(N/W)*T;
+  const speedup = (serial/par).toFixed(1);
+  const L=I18n.get();
+  document.getElementById('serialTime').textContent=(L==='zh'?'序列：':'Serial: ')+serial+' h';
+  document.getElementById('parTime').textContent=(L==='zh'?'平行：':'Parallel: ')+par+' h';
+  document.getElementById('speedup').textContent=(L==='zh'?'加速：':'Speedup: ')+speedup+'×';
+}
+['slS','slW','slT'].forEach(id=>document.getElementById(id).addEventListener('input',updateWF));
+document.addEventListener('langchange',updateWF);
+updateWF();
+
+const QF={zh:{q1_y:'workflow 系統的核心價值是「結構化、自動化、可重現」——速度只是副產品。',q1_n:'正確答案已標示。',q2_y:'HPC 中多用戶共享，無 root 的 Singularity / Apptainer 是業界標準。',q2_n:'正確答案已標示。',q3_y:'nf-core 由社群維護，每個 release 經 CI 全套測試、container 鎖定、文件齊全。',q3_n:'正確答案已標示。'},en:{q1_y:'The core value of workflow systems is structured, automated, reproducible execution — speed is a byproduct.',q1_n:'Correct answer highlighted.',q2_y:'HPC has multi-user sharing without root; Singularity/Apptainer is the industry standard.',q2_n:'Correct answer highlighted.',q3_y:'nf-core is community-maintained, each release CI-tested, container-pinned, well-documented.',q3_n:'Correct answer highlighted.'}};
+document.querySelectorAll('.quiz-q').forEach((q,qi)=>{const ans=+q.dataset.answer;q.querySelectorAll('.quiz-opt').forEach(o=>{o.addEventListener('click',()=>{if(q.classList.contains('answered'))return;q.classList.add('answered');const fb=document.getElementById('fb'+(qi+1));const ok=+o.dataset.idx===ans;o.classList.add(ok?'correct':'wrong');if(!ok)q.querySelectorAll('.quiz-opt')[ans].classList.add('correct');const L=I18n.get();fb.className='quiz-feedback show '+(ok?'correct-fb':'wrong-fb');fb.textContent=(ok?'✅ ':'❌ ')+(QF[L]['q'+(qi+1)+'_'+(ok?'y':'n')]||'');});});});
+</script>
+</body></html>

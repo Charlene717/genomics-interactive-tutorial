@@ -1,0 +1,313 @@
+<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Step 8: Bulk RNA-seq — Genomics Tutorial</title>
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+</head><body>
+<nav class="top-nav"><div class="top-nav-inner">
+  <a href="index.html" class="top-nav-brand"><span>🧬</span> <span data-zh="基因體學教學" data-en="Genomics Tutorial">基因體學教學</span></a>
+  <ul class="top-nav-links"><li><a href="sequencing.html">Seq</a></li><li><a href="qc.html">QC</a></li><li><a href="alignment.html">Align</a></li><li><a href="postalign.html">PostAlign</a></li><li><a href="variant-calling.html">VarCall</a></li><li><a href="annotation.html">Annot</a></li><li><a href="sv-cnv.html">SV/CNV</a></li><li><a href="rnaseq.html" class="active">RNA-seq</a></li><li><a href="chip-atac.html">ChIP/ATAC</a></li><li><a href="methylation.html">Methyl</a></li><li><a href="gwas.html">GWAS</a></li><li><a href="popgen.html">PopGen</a></li><li><a href="enrichment.html">Enrich</a></li><li><a href="workflow.html">Pipeline</a></li>
+    <li><a href="references/index.html" data-zh="📚 參考資料" data-en="📚 References">📚 參考資料</a></li>
+  </ul>
+</div></nav>
+<div class="progress-bar-container"><div class="progress-bar" id="progressBar"></div></div>
+<header class="page-hero"><div class="step-badge">STEP 8 / 14</div>
+<h1 data-zh="Bulk RNA-seq 差異表達分析" data-en="Bulk RNA-seq Differential Expression">Bulk RNA-seq 差異表達分析</h1>
+<p class="subtitle" data-lang="zh">從 FASTQ 到 differentially expressed genes——counts、normalization、模型、視覺化。</p>
+<p class="subtitle" data-lang="en">From FASTQ to differentially expressed genes — counts, normalization, modeling, visualization.</p>
+</header>
+<main class="content-wrap">
+
+<section class="section">
+<div class="section-label" data-zh="概覽" data-en="OVERVIEW">概覽</div>
+<h2 data-zh="Bulk RNA-seq DE 在做什麼？" data-en="What does Bulk RNA-seq DE do?">Bulk RNA-seq DE 在做什麼？</h2>
+<div data-lang="zh">
+<p>Bulk RNA-seq 把組織中所有細胞的 mRNA 混合定序，得到每個基因（或 transcript）的「平均表現量」。差異表達分析（DE）試圖回答：<strong>「在我感興趣的條件對比下（treated vs control，腫瘤 vs 正常），哪些基因表達顯著改變？」</strong></p>
+<p>流程：FASTQ → QC → Alignment (STAR/HISAT2) 或 quasi-mapping (Salmon) → 計數矩陣 (counts × samples) → 過濾低表現基因 → normalization → 統計模型 (DESeq2/edgeR/limma-voom) → 多重檢驗校正 → 視覺化 (Volcano、MA、heatmap、PCA)。</p>
+</div>
+<div data-lang="en">
+<p>Bulk RNA-seq sequences pooled mRNA from a tissue, yielding "average expression" per gene/transcript. DE analysis asks: <strong>"Under my contrast of interest (treated vs control, tumor vs normal), which genes change significantly?"</strong></p>
+<p>Pipeline: FASTQ → QC → Alignment (STAR/HISAT2) or quasi-mapping (Salmon) → counts matrix (genes × samples) → filter low-expression genes → normalization → statistical model (DESeq2/edgeR/limma-voom) → multiple-testing correction → visualization (volcano, MA, heatmap, PCA).</p>
+</div>
+<div class="callout tip"><span class="callout-icon">💡</span><div>
+<span data-lang="zh"><strong>核心原則：</strong>不要用 raw counts 直接比樣本之間；不要用 TPM/FPKM 做 DE。<strong>用 DESeq2/edgeR/limma-voom 的標準流程</strong>——它們同時處理 size factor、dispersion、與基因內變異。</span>
+<span data-lang="en"><strong>Core principle:</strong> Never compare raw counts directly between samples; never use TPM/FPKM for DE. <strong>Use the standard DESeq2/edgeR/limma-voom workflow</strong> — they handle size factors, dispersion, and within-gene variation together.</span>
+</div></div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="核心步驟" data-en="CORE STEPS">核心步驟</div>
+<h2 data-zh="一、五步分析流程" data-en="I. Five-Step Workflow">一、五步分析流程</h2>
+<div class="workflow">
+<div class="workflow-step" data-step="1"><h4 data-zh="Mapping / Quantification" data-en="Mapping / Quantification">1. Mapping / Quantification</h4>
+<div data-lang="zh"><p>兩條路：(a) splice-aware alignment（STAR / HISAT2 → BAM → featureCounts/HTSeq）拿到 gene-level counts；(b) quasi-mapping（Salmon / kallisto）直接拿 transcript-level abundance。Salmon 速度快 10–100×，並輸出 effective length 與 inferential uncertainty，搭配 tximport 可直接餵 DESeq2。</p></div>
+<div data-lang="en"><p>Two routes: (a) splice-aware alignment (STAR / HISAT2 → BAM → featureCounts/HTSeq) for gene-level counts; (b) quasi-mapping (Salmon / kallisto) for transcript-level abundance. Salmon is 10–100× faster and outputs effective length + inferential uncertainty — feed into DESeq2 via tximport.</p></div>
+</div>
+<div class="workflow-step" data-step="2"><h4 data-zh="Filter low-expression" data-en="Filter low-expression">2. Filter low-expression</h4>
+<div data-lang="zh"><p>移除「至少 N 個樣本中 CPM ≥ 1」的基因以下者。低計數基因統計力差且讓多重檢驗校正更嚴格，剔除後 power 提升。<strong>常見：</strong>edgeR <code>filterByExpr()</code>。</p></div>
+<div data-lang="en"><p>Remove genes failing "CPM ≥ 1 in at least N samples". Low-count genes have poor power and tighten multiple-testing correction; removing them increases power. <strong>Common:</strong> edgeR <code>filterByExpr()</code>.</p></div>
+</div>
+<div class="workflow-step" data-step="3"><h4 data-zh="Normalization" data-en="Normalization">3. Normalization</h4>
+<div data-lang="zh"><p>校正樣本間 library size 與 composition bias。<strong>DESeq2</strong> 用 size factor（median-of-ratios）；<strong>edgeR</strong> 用 TMM；<strong>limma-voom</strong> 用 TMM + voom transformation 把 counts 轉成 log-CPM 並估計 mean-variance trend。</p></div>
+<div data-lang="en"><p>Adjust between-sample library size and composition bias. <strong>DESeq2</strong> uses size factors (median-of-ratios); <strong>edgeR</strong> uses TMM; <strong>limma-voom</strong> uses TMM + voom transformation to log-CPM with mean-variance trend.</p></div>
+</div>
+<div class="workflow-step" data-step="4"><h4 data-zh="Modeling & Testing" data-en="Modeling & Testing">4. Modeling & Testing</h4>
+<div data-lang="zh"><p>用 negative binomial（DESeq2、edgeR）或 linear model on log-CPM with weights（limma-voom）擬合每基因。Wald test 或 likelihood ratio test 比較感興趣的 contrast。<strong>務必</strong>用 design matrix 控制 batch / sex / age 等混雜因子。</p></div>
+<div data-lang="en"><p>Fit negative binomial (DESeq2, edgeR) or linear model on log-CPM with weights (limma-voom) per gene. Wald test or likelihood ratio test compares the contrast of interest. <strong>Always</strong> include batch/sex/age in the design matrix to control confounders.</p></div>
+</div>
+<div class="workflow-step" data-step="5"><h4 data-zh="Multiple testing & Visualization" data-en="Multiple testing & Visualization">5. Multiple testing & Visualization</h4>
+<div data-lang="zh"><p>對 ~15K–20K 基因檢驗會有大量假陽性。用 <strong>Benjamini-Hochberg FDR</strong> 校正（DESeq2 預設）；常見 padj &lt; 0.05 + |log2FC| ≥ 1 過濾。視覺化：volcano、MA、heatmap of top genes、PCA、sample-to-sample distance heatmap。</p></div>
+<div data-lang="en"><p>Testing 15K–20K genes generates many false positives. Apply <strong>Benjamini-Hochberg FDR</strong> (DESeq2 default); common threshold padj &lt; 0.05 + |log2FC| ≥ 1. Visualize: volcano, MA, top-gene heatmap, PCA, sample-to-sample distance heatmap.</p></div>
+</div>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="互動模擬" data-en="INTERACTIVE">互動模擬</div>
+<h2 data-zh="二、Volcano Plot 互動篩選" data-en="II. Interactive Volcano Plot">二、Volcano Plot 互動篩選</h2>
+<div data-lang="zh"><p>調整 padj 與 |log2FC| 閾值，觀察 significant DE genes 數量變化。注意過嚴閾值（low FDR + high FC）會錯失「真實但微小」的訊號；過鬆閾值會放入大量假陽性。</p></div>
+<div data-lang="en"><p>Adjust padj and |log2FC| thresholds to see how DE gene counts change. Strict cutoffs miss "real but small" effects; lenient ones flood with false positives.</p></div>
+
+<div class="interactive-panel">
+<div class="sim-stats" id="volStats"></div>
+<div class="slider-group"><label><span data-zh="padj 閾值" data-en="padj threshold">padj</span> <span id="valPadj">0.05</span></label><input type="range" id="slPadj" min="0.001" max="0.2" value="0.05" step="0.001"></div>
+<div class="slider-group"><label><span data-zh="|log2 FC| 閾值" data-en="|log2 FC| threshold">|log2FC|</span> <span id="valFC">1</span></label><input type="range" id="slFC" min="0" max="4" value="1" step="0.1"></div>
+<div class="chart-container" style="height:400px"><canvas id="volChart"></canvas></div>
+<p style="font-size:.82rem;color:var(--c-ink-muted);text-align:center;" data-lang="zh">X: log2 fold change | Y: -log10(padj)</p>
+<p style="font-size:.82rem;color:var(--c-ink-muted);text-align:center;" data-lang="en">X: log2 fold change | Y: -log10(padj)</p>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="工具比較" data-en="TOOLS">工具比較</div>
+<h2 data-zh="三、DESeq2 vs edgeR vs limma-voom" data-en="III. DESeq2 vs edgeR vs limma-voom">三、DESeq2 vs edgeR vs limma-voom</h2>
+<table class="comp-table">
+<thead><tr><th>Tool</th><th data-zh="模型" data-en="Model">模型</th><th data-zh="速度" data-en="Speed">速度</th><th data-zh="最適情境" data-en="Best for">最適情境</th></tr></thead>
+<tbody>
+<tr><td><strong>DESeq2</strong></td><td>NB GLM, Wald</td><td>★★★</td><td data-lang="zh">小樣本 (n &lt; 10)，最穩健</td><td data-lang="en">Small samples (n &lt; 10), most robust</td></tr>
+<tr><td><strong>edgeR (glmQLFit)</strong></td><td>NB GLM, QL F-test</td><td>★★★</td><td data-lang="zh">多因子、時序、cohort</td><td data-lang="en">Multi-factor, time-course, cohorts</td></tr>
+<tr><td><strong>limma-voom</strong></td><td>Linear on log-CPM</td><td>★★★★★</td><td data-lang="zh">大樣本 (n &gt; 20)、複雜 design</td><td data-lang="en">Large samples (n &gt; 20), complex designs</td></tr>
+</tbody></table>
+<div class="callout tip"><span class="callout-icon">📊</span><div>
+<span data-lang="zh"><strong>2025 共識：</strong>在標準 bulk RNA-seq（≥ 3 replicates）情境下三者結果 &gt; 90% 重疊。<strong>選哪個更多是團隊偏好而非客觀勝負</strong>。除非有特殊理由，照團隊既有 pipeline 走最穩。</span>
+<span data-lang="en"><strong>2025 consensus:</strong> For standard bulk RNA-seq (≥ 3 replicates), all three agree on &gt; 90% of DE genes. <strong>Choose what your team already uses</strong> — switching brings no objective gain.</span>
+</div></div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="決策引導" data-en="DECISION GUIDE">決策引導</div>
+<h2 data-zh="四、設計與分析陷阱" data-en="IV. Design & Analysis Pitfalls">四、設計與分析陷阱</h2>
+<div class="decision-tree">
+<h4>🌳 <span data-zh="實驗設計檢查清單" data-en="Design Sanity Checklist">實驗設計檢查清單</span></h4>
+<div data-lang="zh">
+<div class="dt-node"><span class="dt-q">1.</span><div><strong>n ≥ 3 per group</strong>，更好 n ≥ 5。低重複會嚴重低估 dispersion。</div></div>
+<div class="dt-node"><span class="dt-q">2.</span><div><strong>避免 confounded batch</strong>：不要把 condition 全部跑同一 batch；把 control 與 treated 在每 batch 平均分配。</div></div>
+<div class="dt-node"><span class="dt-q">3.</span><div><strong>用 PCA 檢查批次效應</strong>。若 PC1 對應 batch 而非 condition，立刻警覺；在 design 加 batch term。</div></div>
+<div class="dt-node"><span class="dt-q">4.</span><div><strong>strand-specific library</strong> 要對應計數工具參數（<code>-s 1</code>/<code>2</code> for featureCounts；<code>--libtype ISR/ISF</code> for Salmon）。</div></div>
+<div class="dt-node"><span class="dt-q">5.</span><div><strong>不要做 duplicate removal</strong>（RNA 中 dup 多半是真實高表現）。</div></div>
+</div>
+<div data-lang="en">
+<div class="dt-node"><span class="dt-q">1.</span><div><strong>n ≥ 3 per group</strong>, ideally n ≥ 5. Low replication severely underestimates dispersion.</div></div>
+<div class="dt-node"><span class="dt-q">2.</span><div><strong>Avoid confounded batches</strong>: don't run all condition X in one batch; spread control and treated across batches.</div></div>
+<div class="dt-node"><span class="dt-q">3.</span><div><strong>Check batch effects with PCA</strong>. If PC1 captures batch instead of condition, beware — add batch term in design.</div></div>
+<div class="dt-node"><span class="dt-q">4.</span><div><strong>Match strand-specific library</strong> to counting tool params (<code>-s 1</code>/<code>2</code> for featureCounts; <code>--libtype ISR/ISF</code> for Salmon).</div></div>
+<div class="dt-node"><span class="dt-q">5.</span><div><strong>Do not remove duplicates</strong> (most RNA duplicates are real high expression).</div></div>
+</div>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="程式碼" data-en="CODE">程式碼</div>
+<h2 data-zh="完整 RNA-seq DE 流程" data-en="Full RNA-seq DE Pipeline">完整 RNA-seq DE 流程</h2>
+<div class="code-tabs">
+<div class="code-tab-btns">
+  <button class="code-tab-btn active" onclick="switchTab(this,'b1')">Bash (Salmon)</button>
+  <button class="code-tab-btn" onclick="switchTab(this,'r1')">R (DESeq2)</button>
+  <button class="code-tab-btn" onclick="switchTab(this,'r2')">R (edgeR / limma-voom)</button>
+  <button class="code-tab-btn" onclick="switchTab(this,'nf1')">Nextflow (nf-core/rnaseq)</button>
+</div>
+<div class="code-tab-content active" id="b1"><pre><span class="comment"># --- Salmon (quasi-mapping) ---</span>
+<span class="comment"># 1) 建立 decoy-aware index（一次性）/ Build decoy-aware index (one-time)</span>
+<span class="func">grep</span> <span class="str">"^&gt;"</span> ref/hg38.fa | <span class="func">awk</span> <span class="str">'{print substr($1,2)}'</span> &gt; decoys.txt
+<span class="func">cat</span> ref/gencode.v45.transcripts.fa ref/hg38.fa &gt; gentrome.fa
+salmon index -t gentrome.fa -d decoys.txt -i salmon_idx -k <span class="num">31</span>
+
+<span class="comment"># 2) 每樣本 quasi-mapping</span>
+<span class="kw">for</span> s <span class="kw">in</span> S1 S2 S3 S4; <span class="kw">do</span>
+  salmon quant -i salmon_idx -l A \
+    -1 trim_${s}_R1.fq.gz -2 trim_${s}_R2.fq.gz \
+    --gcBias --validateMappings -p <span class="num">8</span> \
+    -o quants/${s}
+<span class="kw">done</span>
+
+<span class="comment"># 結果在 quants/${s}/quant.sf — 用 tximport 進 R / Result in quants/${s}/quant.sf → tximport in R</span></pre></div>
+
+<div class="code-tab-content" id="r1"><pre><span class="comment"># --- R: tximport + DESeq2 ---</span>
+<span class="func">library</span>(tximport); <span class="func">library</span>(DESeq2)
+<span class="func">library</span>(AnnotationDbi); <span class="func">library</span>(org.Hs.eg.db)
+
+<span class="comment"># 1) 樣本表 / Sample sheet</span>
+samples &lt;- <span class="func">data.frame</span>(
+  sample    = <span class="func">c</span>(<span class="str">"S1"</span>,<span class="str">"S2"</span>,<span class="str">"S3"</span>,<span class="str">"S4"</span>),
+  condition = <span class="func">factor</span>(<span class="func">c</span>(<span class="str">"ctrl"</span>,<span class="str">"ctrl"</span>,<span class="str">"trt"</span>,<span class="str">"trt"</span>)),
+  batch     = <span class="func">factor</span>(<span class="func">c</span>(<span class="str">"b1"</span>,<span class="str">"b2"</span>,<span class="str">"b1"</span>,<span class="str">"b2"</span>))
+)
+
+<span class="comment"># 2) tximport — 把 transcript counts 摺到 gene-level</span>
+files &lt;- <span class="func">file.path</span>(<span class="str">"quants"</span>, samples$sample, <span class="str">"quant.sf"</span>)
+tx2gene &lt;- <span class="func">read.csv</span>(<span class="str">"tx2gene.csv"</span>)
+txi &lt;- <span class="func">tximport</span>(files, type=<span class="str">"salmon"</span>, tx2gene=tx2gene)
+
+<span class="comment"># 3) DESeq2 dataset, 帶 batch 校正</span>
+dds &lt;- <span class="func">DESeqDataSetFromTximport</span>(txi, samples, ~ batch + condition)
+dds &lt;- <span class="func">DESeq</span>(dds)
+
+<span class="comment"># 4) filter 低表現</span>
+dds &lt;- dds[<span class="func">rowSums</span>(<span class="func">counts</span>(dds)) &gt;= <span class="num">10</span>, ]
+
+<span class="comment"># 5) 結果與校正</span>
+res &lt;- <span class="func">results</span>(dds, contrast=<span class="func">c</span>(<span class="str">"condition"</span>,<span class="str">"trt"</span>,<span class="str">"ctrl"</span>), alpha=<span class="num">0.05</span>)
+res &lt;- <span class="func">lfcShrink</span>(dds, coef=<span class="str">"condition_trt_vs_ctrl"</span>, type=<span class="str">"apeglm"</span>)
+<span class="func">summary</span>(res)
+
+<span class="comment"># 6) 視覺化 / Visualization</span>
+vsd &lt;- <span class="func">vst</span>(dds, blind=<span class="kw">FALSE</span>)
+<span class="func">plotPCA</span>(vsd, intgroup = <span class="str">"condition"</span>)
+DESeq2::<span class="func">plotMA</span>(res, ylim=<span class="func">c</span>(-<span class="num">5</span>,<span class="num">5</span>))
+
+<span class="comment"># 7) Volcano (用 EnhancedVolcano)</span>
+<span class="func">library</span>(EnhancedVolcano)
+<span class="func">EnhancedVolcano</span>(res, lab=<span class="func">rownames</span>(res),
+   x=<span class="str">"log2FoldChange"</span>, y=<span class="str">"padj"</span>,
+   pCutoff=<span class="num">0.05</span>, FCcutoff=<span class="num">1</span>)</pre></div>
+
+<div class="code-tab-content" id="r2"><pre><span class="comment"># --- edgeR (glmQLFit) ---</span>
+<span class="func">library</span>(edgeR)
+y    &lt;- <span class="func">DGEList</span>(counts=count_matrix, group=samples$condition)
+keep &lt;- <span class="func">filterByExpr</span>(y, design=<span class="func">model.matrix</span>(~ samples$batch + samples$condition))
+y    &lt;- y[keep, , keep.lib.sizes=<span class="kw">FALSE</span>]
+y    &lt;- <span class="func">calcNormFactors</span>(y, method=<span class="str">"TMM"</span>)
+design &lt;- <span class="func">model.matrix</span>(~ samples$batch + samples$condition)
+y    &lt;- <span class="func">estimateDisp</span>(y, design, robust=<span class="kw">TRUE</span>)
+fit  &lt;- <span class="func">glmQLFit</span>(y, design, robust=<span class="kw">TRUE</span>)
+qlf  &lt;- <span class="func">glmQLFTest</span>(fit, coef=<span class="str">"samples$conditiontrt"</span>)
+<span class="func">topTags</span>(qlf, n=<span class="num">20</span>)
+
+<span class="comment"># --- limma-voom (大樣本 / 複雜 design) ---</span>
+<span class="func">library</span>(limma)
+v   &lt;- <span class="func">voom</span>(y, design, plot=<span class="kw">TRUE</span>)
+fit &lt;- <span class="func">lmFit</span>(v, design)
+fit &lt;- <span class="func">eBayes</span>(fit)
+<span class="func">topTable</span>(fit, coef=<span class="str">"samples$conditiontrt"</span>, n=<span class="num">20</span>)</pre></div>
+
+<div class="code-tab-content" id="nf1"><pre><span class="comment">// --- nf-core/rnaseq (一行跑完所有流程) ---</span>
+nextflow run nf-core/rnaseq -r 3.14.0 \
+   --input samplesheet.csv \
+   --outdir results/ \
+   --genome GRCh38 \
+   --aligner star_salmon \
+   --pseudo_aligner salmon \
+   --extra_salmon_quant_args <span class="str">'--gcBias'</span> \
+   -profile docker
+
+<span class="comment">// samplesheet.csv 範例 / Example samplesheet.csv:</span>
+<span class="comment">// sample,fastq_1,fastq_2,strandedness</span>
+<span class="comment">// S1,trim_S1_R1.fq.gz,trim_S1_R2.fq.gz,reverse</span>
+<span class="comment">// S2,trim_S2_R1.fq.gz,trim_S2_R2.fq.gz,reverse</span>
+
+<span class="comment">// 結果含：STAR/Salmon counts、QC reports、multiqc、可直接餵 DESeq2</span></pre></div>
+</div>
+</section>
+
+<section class="quiz-section">
+<h3>📝 <span data-zh="自我檢測" data-en="Self-Check">自我檢測</span></h3>
+<div class="quiz-q" data-answer="2">
+<p data-lang="zh">1. 為什麼不能用 TPM 直接做 DE？</p>
+<p data-lang="en">1. Why can't TPM be used directly for DE?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. TPM 不可比</span><span data-lang="en">A. TPM is not comparable</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. TPM 沒有 normalization</span><span data-lang="en">B. TPM has no normalization</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. DE 模型需要 count-level mean-variance 關係；TPM 是 ratio，沒有原始計數的分散性資訊</span><span data-lang="en">C. DE models need count-level mean-variance relationships; TPM is a ratio with no underlying dispersion info</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. TPM 與基因長度有關</span><span data-lang="en">D. TPM depends on gene length</span></div>
+</div><div class="quiz-feedback" id="fb1"></div></div>
+
+<div class="quiz-q" data-answer="1">
+<p data-lang="zh">2. PCA 第一主成分（PC1）對應的是「定序 batch」而非「實驗條件」，最佳處理？</p>
+<p data-lang="en">2. PC1 in PCA captures "batch" not "condition". Best action?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. 忽略 PCA，直接 DE</span><span data-lang="en">A. Ignore PCA, run DE anyway</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. 把 batch 加入 design matrix（<code>~ batch + condition</code>）</span><span data-lang="en">B. Add batch to the design matrix (<code>~ batch + condition</code>)</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. 丟掉所有 batch 1 樣本</span><span data-lang="en">C. Drop all batch-1 samples</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. 重新定序</span><span data-lang="en">D. Resequence the whole experiment</span></div>
+</div><div class="quiz-feedback" id="fb2"></div></div>
+
+<div class="quiz-q" data-answer="1">
+<p data-lang="zh">3. n = 2 per group 做 DESeq2，最大風險？</p>
+<p data-lang="en">3. Running DESeq2 with n = 2 per group has what main risk?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. DESeq2 無法執行</span><span data-lang="en">A. DESeq2 won't run</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. dispersion 估計極不穩，false positive/negative 大幅升高</span><span data-lang="en">B. Unstable dispersion estimates → false positives/negatives spike</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. 結果完全 OK</span><span data-lang="en">C. Results are perfectly fine</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. 必須改用 t-test</span><span data-lang="en">D. Must switch to t-test</span></div>
+</div><div class="quiz-feedback" id="fb3"></div></div>
+</section>
+
+<nav class="page-nav">
+<a href="sv-cnv.html"><span class="nav-dir" data-zh="← 上一步" data-en="← Previous">← 上一步</span><span class="nav-title" data-zh="Step 7: 結構變異與 CNV (SV &amp; CNV)" data-en="Step 7: Structural Variants &amp; CNVs">Step 7: 結構變異與 CNV (SV & CNV)</span></a>
+<a href="chip-atac.html"><span class="nav-dir" data-zh="下一步 →" data-en="Next →">下一步 →</span><span class="nav-title" data-zh="Step 9: ChIP-seq 與 ATAC-seq" data-en="Step 9: ChIP-seq &amp; ATAC-seq">Step 9: ChIP-seq 與 ATAC-seq</span></a>
+</nav>
+</main>
+<footer class="site-footer">© Charlene — Genomics Interactive Tutorial</footer>
+<script src="i18n.js"></script>
+<script>
+window.addEventListener('scroll',()=>{const h=document.documentElement;document.getElementById('progressBar').style.width=(h.scrollTop/(h.scrollHeight-h.clientHeight))*100+'%';});
+function switchTab(b,id){const p=b.closest('.code-tabs');p.querySelectorAll('.code-tab-btn').forEach(x=>x.classList.remove('active'));p.querySelectorAll('.code-tab-content').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.getElementById(id).classList.add('active');}
+
+// Simulated volcano
+function randn(){let u=0,v=0;while(u===0)u=Math.random();while(v===0)v=Math.random();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+const genes=[];
+for(let i=0;i<2000;i++){
+  const r=Math.random();
+  let lfc, padj;
+  if(r<0.04){lfc=2.5+Math.abs(randn())*1.5; padj=Math.pow(10,-(3+Math.abs(randn())*8));}
+  else if(r<0.08){lfc=-(2.5+Math.abs(randn())*1.5); padj=Math.pow(10,-(3+Math.abs(randn())*8));}
+  else if(r<0.15){lfc=randn()*2; padj=Math.pow(10,-(1+Math.abs(randn())*2));}
+  else{lfc=randn()*0.6; padj=0.05+Math.random()*0.95;}
+  genes.push({lfc, padj, mlog: -Math.log10(padj)});
+}
+
+const volChart=new Chart(document.getElementById('volChart'),{type:'scatter',data:{datasets:[
+  {label:'NS',data:[],backgroundColor:'rgba(150,150,150,.35)'},
+  {label:'Up',data:[],backgroundColor:'rgba(192,57,43,.65)'},
+  {label:'Down',data:[],backgroundColor:'rgba(26,107,90,.7)'}
+]},options:{responsive:true,maintainAspectRatio:false,animation:false,scales:{x:{title:{display:true,text:'log2 FC'},min:-7,max:7},y:{title:{display:true,text:'-log10(padj)'},min:0,max:14}},plugins:{legend:{position:'top'}}}});
+
+function updateVol(){
+  const padjCut=+document.getElementById('slPadj').value;
+  const fcCut=+document.getElementById('slFC').value;
+  document.getElementById('valPadj').textContent=padjCut.toFixed(3);
+  document.getElementById('valFC').textContent=fcCut.toFixed(1);
+  const ns=[], up=[], dn=[];
+  genes.forEach(g=>{
+    const pt={x:g.lfc, y:g.mlog};
+    if(g.padj<padjCut && g.lfc>=fcCut) up.push(pt);
+    else if(g.padj<padjCut && g.lfc<=-fcCut) dn.push(pt);
+    else ns.push(pt);
+  });
+  volChart.data.datasets[0].data=ns;
+  volChart.data.datasets[1].data=up;
+  volChart.data.datasets[2].data=dn;
+  volChart.update('none');
+  const L=I18n.get();
+  document.getElementById('volStats').innerHTML =
+    `<span class="sim-stat pass">${L==='zh'?'上調':'Up'}: ${up.length}</span>`+
+    `<span class="sim-stat pass">${L==='zh'?'下調':'Down'}: ${dn.length}</span>`+
+    `<span class="sim-stat fail">${L==='zh'?'未顯著':'NS'}: ${ns.length}</span>`;
+}
+['slPadj','slFC'].forEach(id=>document.getElementById(id).addEventListener('input',updateVol));
+document.addEventListener('langchange',updateVol);
+updateVol();
+
+const QF={zh:{q1_y:'TPM 為 transcript-level 比例，丟失原始 count 的 mean-variance 結構，無法擬合 NB 模型。',q1_n:'正確答案已標示。',q2_y:'在 design 中校正 batch（~ batch + condition）是標準做法。',q2_n:'正確答案已標示。',q3_y:'n=2 時，每基因 dispersion 幾乎無法估計，結果極不可靠。',q3_n:'正確答案已標示。'},en:{q1_y:'TPM is a transcript-level ratio that loses raw count mean-variance structure required by NB models.',q1_n:'Correct answer highlighted.',q2_y:'The standard fix is to put batch in the design matrix (~ batch + condition).',q2_n:'Correct answer highlighted.',q3_y:'At n=2, per-gene dispersion cannot be estimated reliably — results are very unstable.',q3_n:'Correct answer highlighted.'}};
+document.querySelectorAll('.quiz-q').forEach((q,qi)=>{const ans=+q.dataset.answer;q.querySelectorAll('.quiz-opt').forEach(o=>{o.addEventListener('click',()=>{if(q.classList.contains('answered'))return;q.classList.add('answered');const fb=document.getElementById('fb'+(qi+1));const ok=+o.dataset.idx===ans;o.classList.add(ok?'correct':'wrong');if(!ok)q.querySelectorAll('.quiz-opt')[ans].classList.add('correct');const L=I18n.get();fb.className='quiz-feedback show '+(ok?'correct-fb':'wrong-fb');fb.textContent=(ok?'✅ ':'❌ ')+(QF[L]['q'+(qi+1)+'_'+(ok?'y':'n')]||'');});});});
+</script>
+</body></html>

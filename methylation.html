@@ -1,0 +1,278 @@
+<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Step 10: DNA Methylation & Epigenomics — Genomics Tutorial</title>
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+</head><body>
+<nav class="top-nav"><div class="top-nav-inner">
+  <a href="index.html" class="top-nav-brand"><span>🧬</span> <span data-zh="基因體學教學" data-en="Genomics Tutorial">基因體學教學</span></a>
+  <ul class="top-nav-links"><li><a href="sequencing.html">Seq</a></li><li><a href="qc.html">QC</a></li><li><a href="alignment.html">Align</a></li><li><a href="postalign.html">PostAlign</a></li><li><a href="variant-calling.html">VarCall</a></li><li><a href="annotation.html">Annot</a></li><li><a href="sv-cnv.html">SV/CNV</a></li><li><a href="rnaseq.html">RNA-seq</a></li><li><a href="chip-atac.html">ChIP/ATAC</a></li><li><a href="methylation.html" class="active">Methyl</a></li><li><a href="gwas.html">GWAS</a></li><li><a href="popgen.html">PopGen</a></li><li><a href="enrichment.html">Enrich</a></li><li><a href="workflow.html">Pipeline</a></li>
+    <li><a href="references/index.html" data-zh="📚 參考資料" data-en="📚 References">📚 參考資料</a></li>
+  </ul>
+</div></nav>
+<div class="progress-bar-container"><div class="progress-bar" id="progressBar"></div></div>
+<header class="page-hero"><div class="step-badge">STEP 10 / 14</div>
+<h1 data-zh="DNA 甲基化與表觀基因體" data-en="DNA Methylation & Epigenomics">DNA 甲基化與表觀基因體</h1>
+<p class="subtitle" data-lang="zh">5mC 在 CpG 上的調控密碼——WGBS、RRBS、與長讀長原生偵測。</p>
+<p class="subtitle" data-lang="en">The 5mC regulatory code at CpGs — WGBS, RRBS, and long-read native detection.</p>
+</header>
+<main class="content-wrap">
+
+<section class="section">
+<div class="section-label" data-zh="概覽" data-en="OVERVIEW">概覽</div>
+<h2 data-zh="為什麼甲基化重要？" data-en="Why methylation matters">為什麼甲基化重要？</h2>
+<div data-lang="zh">
+<p>DNA 甲基化（哺乳類主要為 <strong>CpG dinucleotide 上的 5mC</strong>）是穩定的表觀調控標記。<strong>啟動子 CpG island 高甲基化</strong>通常壓抑基因表現；<strong>基因體區 (gene body) 甲基化</strong>則常與活躍轉錄正相關。<strong>差異甲基化區域 (DMR)</strong> 在腫瘤、發育、老化、神經退化都有重要角色。</p>
+<p>偵測甲基化的兩條路：(1) <strong>Bisulfite sequencing</strong>——非甲基化 C 被亞硫酸氫鈉轉成 U（測得 T），甲基化 C 保持為 C；比較讀出來的 C/T 比例。(2) <strong>長讀長原生偵測</strong>——Nanopore 與 PacBio HiFi 能直接從電流/動力學訊號區分 5mC，無需 bisulfite。</p>
+</div>
+<div data-lang="en">
+<p>DNA methylation (mainly <strong>5mC at CpG dinucleotides</strong> in mammals) is a stable epigenetic mark. <strong>Promoter CpG island hypermethylation</strong> typically silences genes; <strong>gene-body methylation</strong> often correlates with active transcription. <strong>Differentially methylated regions (DMRs)</strong> play roles in cancer, development, aging, and neurodegeneration.</p>
+<p>Two detection routes: (1) <strong>Bisulfite sequencing</strong> — unmethylated C is converted to U (sequenced as T) by sodium bisulfite, methylated C stays as C; compare the C/T ratio. (2) <strong>Native long-read detection</strong> — Nanopore and PacBio HiFi distinguish 5mC directly from current/kinetics signals, no bisulfite needed.</p>
+</div>
+<div class="callout tip"><span class="callout-icon">💡</span><div>
+<span data-lang="zh"><strong>核心原則：</strong>Bisulfite 化學會把 ref 中的所有 C → T（除了 5mC 的 C），因此<strong>標準 aligner 無法直接用</strong>，必須用 Bisulfite-aware aligner（Bismark、bwa-meth）。CpH (CHG、CHH) 在植物與胚胎幹細胞重要。</span>
+<span data-lang="en"><strong>Core principle:</strong> Bisulfite converts all unmethylated C → T (except 5mC), so <strong>standard aligners cannot map directly</strong> — use bisulfite-aware aligners (Bismark, bwa-meth). CpH context (CHG, CHH) matters in plants and embryonic stem cells.</span>
+</div></div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="技術比較" data-en="METHODS">技術比較</div>
+<h2 data-zh="一、主要甲基化定序方法" data-en="I. Main Methylation Sequencing Methods">一、主要甲基化定序方法</h2>
+<table class="comp-table">
+<thead><tr><th data-zh="方法" data-en="Method">方法</th><th data-zh="原理" data-en="Principle">原理</th><th data-zh="覆蓋" data-en="Coverage">覆蓋</th><th data-zh="優缺" data-en="Pros/Cons">優缺</th></tr></thead>
+<tbody>
+<tr><td><strong>WGBS</strong></td><td data-lang="zh">全基因組 bisulfite</td><td data-lang="zh">全 CpG (~28M)</td><td data-lang="zh">+ 全面 / - 貴、需 30× 以上</td><td data-lang="en">Whole-genome bisulfite</td><td data-lang="en">All CpGs (~28M)</td><td data-lang="en">+ comprehensive / - costly, needs 30× +</td></tr>
+<tr><td><strong>RRBS</strong></td><td data-lang="zh">MspI 酶切富集 CpG-rich 區段 + bisulfite</td><td data-lang="zh">~3M CpG (主要 CGI / promoter)</td><td data-lang="zh">+ 便宜、聚焦 / - 不全面</td><td data-lang="en">MspI digestion enriches CpG-rich + bisulfite</td><td data-lang="en">~3M CpGs (mainly CGI / promoters)</td><td data-lang="en">+ cheap, focused / - not comprehensive</td></tr>
+<tr><td><strong>EM-seq</strong></td><td data-lang="zh">酶切 (TET2 + APOBEC) 取代 bisulfite</td><td data-lang="zh">全 CpG</td><td data-lang="zh">+ 較溫和、library 品質好、低 input</td><td data-lang="en">Enzymatic conversion (TET2 + APOBEC)</td><td data-lang="en">All CpGs</td><td data-lang="en">+ gentler, better library quality, lower input</td></tr>
+<tr><td><strong>Nanopore native</strong></td><td data-lang="zh">電流訊號直接區分 5mC/6mA</td><td data-lang="zh">全基因組 (含長 CpG 區)</td><td data-lang="zh">+ 無 bisulfite、長讀長 phasing / - 鹼基級準確度仍稍遜</td><td data-lang="en">Current signal distinguishes 5mC/6mA</td><td data-lang="en">Whole genome (incl. long CpG regions)</td><td data-lang="en">+ no bisulfite, long-read phasing / - per-base accuracy slightly lower</td></tr>
+<tr><td><strong>PacBio kinetics</strong></td><td data-lang="zh">聚合反應動力學變化偵測 modification</td><td data-lang="zh">全基因組</td><td data-lang="zh">+ HiFi 高準確 / - 需 5mC-specific basecaller</td><td data-lang="en">Polymerase kinetics detects modifications</td><td data-lang="en">Whole genome</td><td data-lang="en">+ HiFi accuracy / - needs 5mC-specific basecaller</td></tr>
+<tr><td><strong>Illumina EPIC array</strong></td><td data-lang="zh">~935K CpG 探針陣列</td><td data-lang="zh">~935K CpGs</td><td data-lang="zh">+ 便宜、流行病學標準 / - 探針有限</td><td data-lang="en">~935K CpG probe array</td><td data-lang="en">~935K CpGs</td><td data-lang="en">+ cheap, epidemiology standard / - limited probes</td></tr>
+</tbody></table>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="互動模擬" data-en="INTERACTIVE">互動模擬</div>
+<h2 data-zh="二、Beta value & M value 轉換" data-en="II. Beta ↔ M Value Conversion">二、Beta value & M value 轉換</h2>
+<div data-lang="zh"><p>甲基化分數（methylation fraction, β）= methylated reads / total reads。β 介於 0–1。雖然直觀，但<strong>不適合線性模型</strong>（heteroscedastic：β 接近 0 或 1 時變異被壓縮）。<strong>M value = log2(β / (1-β))</strong> 是常見的線性化轉換，更適合 DE 分析。拖滑桿觀察兩者關係。</p></div>
+<div data-lang="en"><p>Methylation fraction β = methylated reads / total reads, in [0, 1]. Intuitive but <strong>not suitable for linear models</strong> — heteroscedastic, variance is compressed near 0 and 1. <strong>M value = log2(β / (1-β))</strong> is the standard linearizing transform for DE-like analyses. Drag the slider.</p></div>
+
+<div class="interactive-panel">
+<div class="sim-stats">
+  <span class="sim-stat pass" id="betaShow">—</span>
+  <span class="sim-stat pass" id="mShow">—</span>
+  <span class="sim-stat pass" id="callShow">—</span>
+</div>
+<div class="slider-group"><label><span data-zh="Beta value (β)" data-en="Beta value (β)">β</span> <span id="valBeta">0.5</span></label><input type="range" id="slBeta" min="0.005" max="0.995" value="0.5" step="0.005"></div>
+<div class="chart-container"><canvas id="bmChart"></canvas></div>
+<p style="font-size:.82rem;color:var(--c-ink-muted);text-align:center;" data-lang="zh">X: β (0–1) | Y: M value (log-odds)</p>
+<p style="font-size:.82rem;color:var(--c-ink-muted);text-align:center;" data-lang="en">X: β (0–1) | Y: M value (log-odds)</p>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="3D Genome" data-en="3D GENOME">3D Genome</h2>
+<h2 data-zh="三、Hi-C 與 3D 基因體" data-en="III. Hi-C and 3D Genome">三、Hi-C 與 3D 基因體</h2>
+<div data-lang="zh">
+<p><strong>Hi-C</strong> 用 crosslink + restriction digestion + ligation 捕捉空間鄰近的 DNA 對，定序產生 <strong>contact matrix</strong>，揭示 3D 染色體結構：</p>
+<ul style="margin:8px 0 0 20px;color:var(--c-ink-light);">
+<li><strong>Compartment A/B：</strong>~Mb 級別的「活躍 / 抑制」分區（兩者甲基化模式差異大）。</li>
+<li><strong>TAD (Topologically Associating Domain)：</strong>數百 kb–1 Mb，邊界由 CTCF + cohesin 限定，TAD 內接觸頻率高。</li>
+<li><strong>Loops / Enhancer-Promoter contacts：</strong>kb–百 kb 的精細接觸，常對應功能調控。</li>
+</ul>
+<p><strong>工具：</strong>HiC-Pro / Juicer / cooler / hicexplorer。<strong>應用：</strong>整合 Hi-C + ChIP-seq + ATAC-seq + Methylation 重建細胞型別的 epigenome landscape。</p>
+</div>
+<div data-lang="en">
+<p><strong>Hi-C</strong> uses crosslink + restriction digest + ligation to capture spatially adjacent DNA pairs, sequenced into a <strong>contact matrix</strong> revealing 3D structure:</p>
+<ul style="margin:8px 0 0 20px;color:var(--c-ink-light);">
+<li><strong>A/B compartments:</strong> ~Mb-scale "active/repressed" partitions (their methylation profiles differ markedly).</li>
+<li><strong>TADs (Topologically Associating Domains):</strong> few hundred kb–1 Mb, bounded by CTCF + cohesin; within-TAD contacts are enriched.</li>
+<li><strong>Loops / Enhancer-Promoter contacts:</strong> kb to hundreds of kb fine-scale contacts, often functional.</li>
+</ul>
+<p><strong>Tools:</strong> HiC-Pro / Juicer / cooler / hicexplorer. <strong>Use:</strong> integrate Hi-C + ChIP-seq + ATAC-seq + methylation to reconstruct a cell-type epigenome landscape.</p>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="決策引導" data-en="DECISION GUIDE">決策引導</div>
+<h2 data-zh="四、技術選擇與分析陷阱" data-en="IV. Method Choice & Pitfalls">四、技術選擇與分析陷阱</h2>
+<div class="decision-tree">
+<h4>🌳 <span data-zh="甲基化技術選擇" data-en="Method Selection">甲基化技術選擇</span></h4>
+<div data-lang="zh">
+<div class="dt-node"><span class="dt-q">Q1:</span><div>大規模流行病學 / EWAS（n &gt; 1000）？<span class="dt-arrow">→ 是 →</span> <strong>EPIC array</strong>（成本、可比性最佳）</div></div>
+<div class="dt-node"><span class="dt-q">Q2:</span><div>focus 於 CGI / promoter 的小型研究？<span class="dt-arrow">→ 是 →</span> <strong>RRBS</strong>（性價比佳）</div></div>
+<div class="dt-node"><span class="dt-q">Q3:</span><div>需要全基因體解析（如腫瘤完整 methylome）？<span class="dt-arrow">→ 是 →</span> <strong>WGBS</strong> 或 <strong>EM-seq</strong>（後者 library 品質更穩）</div></div>
+<div class="dt-node"><span class="dt-q">Q4:</span><div>需要 phasing（allele-specific methylation）或不想做 bisulfite？<span class="dt-arrow">→ 是 →</span> <strong>Nanopore native</strong> 或 <strong>PacBio HiFi + 5mC basecaller</strong></div></div>
+<div class="dt-node"><span class="dt-q">Q5:</span><div>差異分析？<span class="dt-arrow">→ 是 →</span> <strong>methylKit</strong>（基因組級 logistic）或 <strong>DSS</strong>（beta-binomial）；EPIC 用 <strong>limma + M-values</strong></div></div>
+</div>
+<div data-lang="en">
+<div class="dt-node"><span class="dt-q">Q1:</span><div>Large-scale epidemiology / EWAS (n &gt; 1000)? <span class="dt-arrow">→ Yes →</span> <strong>EPIC array</strong> (cost, comparability)</div></div>
+<div class="dt-node"><span class="dt-q">Q2:</span><div>Focused study on CGI / promoters? <span class="dt-arrow">→ Yes →</span> <strong>RRBS</strong> (cost-effective)</div></div>
+<div class="dt-node"><span class="dt-q">Q3:</span><div>Need whole-genome methylome (e.g., comprehensive tumor)? <span class="dt-arrow">→ Yes →</span> <strong>WGBS</strong> or <strong>EM-seq</strong> (latter more stable library)</div></div>
+<div class="dt-node"><span class="dt-q">Q4:</span><div>Need phasing (allele-specific methylation) or avoid bisulfite? <span class="dt-arrow">→ Yes →</span> <strong>Nanopore native</strong> or <strong>PacBio HiFi + 5mC basecaller</strong></div></div>
+<div class="dt-node"><span class="dt-q">Q5:</span><div>Differential analysis? <span class="dt-arrow">→ Yes →</span> <strong>methylKit</strong> (genome-wide logistic) or <strong>DSS</strong> (beta-binomial); for EPIC use <strong>limma + M-values</strong></div></div>
+</div>
+</div>
+
+<div class="callout warn"><span class="callout-icon">⚠️</span><div>
+<span data-lang="zh"><strong>常見錯誤：</strong>① 把 bisulfite reads 餵給 BWA → 大量未比對；② 沒過濾 SNP（C→T SNP 會偽裝成 demethylation）；③ 對 β value 直接做 t-test（heteroscedasticity 違反假設）；④ 沒考慮細胞型別組成（whole-blood methylation 主要受白血球比例影響——必要時用 RefBase / EpiDISH 校正）。</span>
+<span data-lang="en"><strong>Common errors:</strong> ① Feeding bisulfite reads to BWA → massive unmapped; ② Not filtering SNPs (a C→T SNP masquerades as demethylation); ③ T-test directly on β-values (violates homoscedasticity); ④ Ignoring cell-type composition (whole-blood methylation is dominated by leukocyte proportions — correct with RefBase / EpiDISH when needed).</span>
+</div></div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="程式碼" data-en="CODE">程式碼</div>
+<h2 data-zh="甲基化分析實作" data-en="Methylation Analysis">甲基化分析實作</h2>
+<div class="code-tabs">
+<div class="code-tab-btns">
+  <button class="code-tab-btn active" onclick="switchTab(this,'b1')">Bash (Bismark)</button>
+  <button class="code-tab-btn" onclick="switchTab(this,'b2')">Bash (Nanopore)</button>
+  <button class="code-tab-btn" onclick="switchTab(this,'r1')">R (methylKit / minfi)</button>
+</div>
+<div class="code-tab-content active" id="b1"><pre><span class="comment"># --- Bismark (WGBS / RRBS) ---</span>
+<span class="comment"># 1) 建 bisulfite genome index（一次性）</span>
+bismark_genome_preparation ref/
+
+<span class="comment"># 2) 比對 (paired-end)</span>
+bismark --genome ref/ \
+   -1 trim_R1.fq.gz -2 trim_R2.fq.gz \
+   -o bismark_out/ \
+   --multicore <span class="num">4</span>
+
+<span class="comment"># 3) Dedup（WGBS 必做；RRBS 不需要）</span>
+deduplicate_bismark --paired bismark_out/sample_R1_bismark_bt2_pe.bam
+
+<span class="comment"># 4) 抽取每 CpG 的 methylation call</span>
+bismark_methylation_extractor --paired-end --comprehensive --cytosine_report \
+   --genome_folder ref/ \
+   -o methcalls/ \
+   bismark_out/sample.deduplicated.bam
+
+<span class="comment"># 結果在 .CX_report.txt（CpG/CHG/CHH 個別列出）</span></pre></div>
+
+<div class="code-tab-content" id="b2"><pre><span class="comment"># --- Nanopore native 5mC（modkit + dorado） ---</span>
+<span class="comment"># 1) basecalling 含 5mC modifications</span>
+dorado basecaller --modified-bases 5mCG_5hmCG \
+   model_path/ \
+   pod5_dir/ &gt; reads.bam
+
+<span class="comment"># 2) 比對</span>
+samtools fastq -T MM,ML reads.bam | \
+  minimap2 -y -ax map-ont -t <span class="num">16</span> ref/hg38.fa - | \
+  samtools sort -@ <span class="num">8</span> -o ont.sorted.bam -
+samtools index ont.sorted.bam
+
+<span class="comment"># 3) modkit 抽 per-CpG methylation</span>
+modkit pileup ont.sorted.bam pileup.bed.gz \
+   --ref ref/hg38.fa \
+   --cpg --combine-strands \
+   --threads <span class="num">16</span>
+
+<span class="comment"># pileup.bed.gz: chrom start end mod_code N_valid_cov frac_modified ...</span></pre></div>
+
+<div class="code-tab-content" id="r1"><pre><span class="comment"># --- R: methylKit (WGBS/RRBS DMR) ---</span>
+<span class="func">library</span>(methylKit)
+
+files &lt;- <span class="func">list</span>(<span class="str">"S1.bismark.cov.gz"</span>, <span class="str">"S2.bismark.cov.gz"</span>,
+              <span class="str">"S3.bismark.cov.gz"</span>, <span class="str">"S4.bismark.cov.gz"</span>)
+myObj &lt;- <span class="func">methRead</span>(files,
+   sample.id   = <span class="func">list</span>(<span class="str">"S1"</span>,<span class="str">"S2"</span>,<span class="str">"S3"</span>,<span class="str">"S4"</span>),
+   assembly    = <span class="str">"hg38"</span>,
+   pipeline    = <span class="str">"bismarkCoverage"</span>,
+   treatment   = <span class="func">c</span>(<span class="num">0</span>,<span class="num">0</span>,<span class="num">1</span>,<span class="num">1</span>),
+   context     = <span class="str">"CpG"</span>,
+   mincoverage = <span class="num">10</span>
+)
+
+meth  &lt;- <span class="func">unite</span>(myObj, destrand=<span class="kw">FALSE</span>)
+diff  &lt;- <span class="func">calculateDiffMeth</span>(meth, mc.cores=<span class="num">4</span>)
+hyper &lt;- <span class="func">getMethylDiff</span>(diff, difference=<span class="num">25</span>, qvalue=<span class="num">0.01</span>, type=<span class="str">"hyper"</span>)
+hypo  &lt;- <span class="func">getMethylDiff</span>(diff, difference=<span class="num">25</span>, qvalue=<span class="num">0.01</span>, type=<span class="str">"hypo"</span>)
+
+<span class="comment"># --- R: minfi (EPIC array) ---</span>
+<span class="func">library</span>(minfi); <span class="func">library</span>(limma)
+rgSet  &lt;- <span class="func">read.metharray.exp</span>(<span class="str">"idat_dir/"</span>)
+mSet   &lt;- <span class="func">preprocessQuantile</span>(rgSet)
+M      &lt;- <span class="func">getM</span>(mSet)        <span class="comment"># M-values 用於 limma</span>
+design &lt;- <span class="func">model.matrix</span>(~ pheno$condition + pheno$age + pheno$sex)
+fit    &lt;- <span class="func">eBayes</span>(<span class="func">lmFit</span>(M, design))
+<span class="func">topTable</span>(fit, coef=<span class="str">"pheno$conditiondisease"</span>)</pre></div>
+</div>
+</section>
+
+<section class="quiz-section">
+<h3>📝 <span data-zh="自我檢測" data-en="Self-Check">自我檢測</span></h3>
+<div class="quiz-q" data-answer="1">
+<p data-lang="zh">1. Bisulfite-treated reads 為什麼不能餵給 BWA？</p>
+<p data-lang="en">1. Why can't bisulfite-treated reads be aligned with BWA?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. BWA 不支援 paired-end</span><span data-lang="en">A. BWA doesn't do paired-end</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. Bisulfite 把大部分 C → T，造成大量「mismatch」讓 BWA 無法定位</span><span data-lang="en">B. Bisulfite converts most C → T causing massive mismatches that prevent BWA from mapping</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. BWA 不支援人類</span><span data-lang="en">C. BWA doesn't support human</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. 因為太貴</span><span data-lang="en">D. Because it's expensive</span></div>
+</div><div class="quiz-feedback" id="fb1"></div></div>
+
+<div class="quiz-q" data-answer="2">
+<p data-lang="zh">2. β value 與 M value 之間的關係？</p>
+<p data-lang="en">2. Relationship between β value and M value?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. M = β × 100</span><span data-lang="en">A. M = β × 100</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. M = -log10(β)</span><span data-lang="en">B. M = -log10(β)</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. M = log2(β / (1 - β))</span><span data-lang="en">C. M = log2(β / (1 - β))</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. M 與 β 沒有關係</span><span data-lang="en">D. No relationship</span></div>
+</div><div class="quiz-feedback" id="fb2"></div></div>
+
+<div class="quiz-q" data-answer="2">
+<p data-lang="zh">3. 為什麼 whole-blood 樣本的甲基化分析需要校正細胞組成？</p>
+<p data-lang="en">3. Why do whole-blood methylation analyses need cell-composition correction?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. 血液量太少</span><span data-lang="en">A. Insufficient blood volume</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. 紅血球沒有 DNA</span><span data-lang="en">B. RBCs have no DNA</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. 不同白血球亞群甲基化譜差異大，比例變化會掩蓋真正的疾病訊號</span><span data-lang="en">C. Different leukocyte subsets have very different methylomes; proportion shifts mask true disease signals</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. 為了去 SNP</span><span data-lang="en">D. To remove SNPs</span></div>
+</div><div class="quiz-feedback" id="fb3"></div></div>
+</section>
+
+<nav class="page-nav">
+<a href="chip-atac.html"><span class="nav-dir" data-zh="← 上一步" data-en="← Previous">← 上一步</span><span class="nav-title" data-zh="Step 9: ChIP-seq 與 ATAC-seq" data-en="Step 9: ChIP-seq &amp; ATAC-seq">Step 9: ChIP-seq 與 ATAC-seq</span></a>
+<a href="gwas.html"><span class="nav-dir" data-zh="下一步 →" data-en="Next →">下一步 →</span><span class="nav-title" data-zh="Step 11: GWAS 全基因組關聯分析" data-en="Step 11: GWAS — Genome-Wide Association Study">Step 11: GWAS 全基因組關聯分析</span></a>
+</nav>
+</main>
+<footer class="site-footer">© Charlene — Genomics Interactive Tutorial</footer>
+<script src="i18n.js"></script>
+<script>
+window.addEventListener('scroll',()=>{const h=document.documentElement;document.getElementById('progressBar').style.width=(h.scrollTop/(h.scrollHeight-h.clientHeight))*100+'%';});
+function switchTab(b,id){const p=b.closest('.code-tabs');p.querySelectorAll('.code-tab-btn').forEach(x=>x.classList.remove('active'));p.querySelectorAll('.code-tab-content').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.getElementById(id).classList.add('active');}
+
+// Beta-M chart
+const data=[];
+for(let b=0.005;b<=0.995;b+=0.01){
+  const m = Math.log2(b/(1-b));
+  data.push({x:b, y:m});
+}
+const bmChart=new Chart(document.getElementById('bmChart'),{type:'line',data:{datasets:[
+  {label:'β→M curve',data:data,borderColor:'#1a6b5a',backgroundColor:'rgba(26,107,90,.1)',fill:false,tension:.3,pointRadius:0},
+  {label:'Current β',data:[{x:0.5,y:0}],borderColor:'#d4a03c',backgroundColor:'#d4a03c',pointRadius:10,pointHoverRadius:12,showLine:false}
+]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{title:{display:true,text:'β value'},min:0,max:1},y:{title:{display:true,text:'M value (log2 odds)'},min:-8,max:8}},plugins:{legend:{position:'top'}}}});
+
+function updateBM(){
+  const b=+document.getElementById('slBeta').value;
+  const m=Math.log2(b/(1-b));
+  document.getElementById('valBeta').textContent=b.toFixed(3);
+  document.getElementById('betaShow').textContent='β = '+b.toFixed(3);
+  document.getElementById('mShow').textContent='M = '+m.toFixed(2);
+  const L=I18n.get();
+  let call;
+  if(b<0.2) call=L==='zh'?'低甲基化':'Hypomethylated';
+  else if(b>0.8) call=L==='zh'?'高甲基化':'Hypermethylated';
+  else call=L==='zh'?'中間':'Intermediate';
+  document.getElementById('callShow').textContent=call;
+  bmChart.data.datasets[1].data=[{x:b, y:m}];
+  bmChart.update('none');
+}
+document.getElementById('slBeta').addEventListener('input',updateBM);
+document.addEventListener('langchange',updateBM);
+updateBM();
+
+const QF={zh:{q1_y:'bisulfite 把大量 C 變 T，標準 aligner 把它們當 mismatch；必須用 bisulfite-aware aligner（Bismark）。',q1_n:'正確答案已標示。',q2_y:'M = log2(β/(1-β))，是 β value 的 logit 線性化。',q2_n:'正確答案已標示。',q3_y:'白血球比例變化會主導訊號；EpiDISH 等工具用 reference profile 估計細胞比例做校正。',q3_n:'正確答案已標示。'},en:{q1_y:'Bisulfite turns most Cs into Ts; standard aligners treat them as mismatches — use a bisulfite-aware aligner (Bismark).',q1_n:'Correct answer highlighted.',q2_y:'M = log2(β/(1-β)), the logit transform of β.',q2_n:'Correct answer highlighted.',q3_y:'Leukocyte proportions dominate the signal; tools like EpiDISH estimate cell-type fractions for correction.',q3_n:'Correct answer highlighted.'}};
+document.querySelectorAll('.quiz-q').forEach((q,qi)=>{const ans=+q.dataset.answer;q.querySelectorAll('.quiz-opt').forEach(o=>{o.addEventListener('click',()=>{if(q.classList.contains('answered'))return;q.classList.add('answered');const fb=document.getElementById('fb'+(qi+1));const ok=+o.dataset.idx===ans;o.classList.add(ok?'correct':'wrong');if(!ok)q.querySelectorAll('.quiz-opt')[ans].classList.add('correct');const L=I18n.get();fb.className='quiz-feedback show '+(ok?'correct-fb':'wrong-fb');fb.textContent=(ok?'✅ ':'❌ ')+(QF[L]['q'+(qi+1)+'_'+(ok?'y':'n')]||'');});});});
+</script>
+</body></html>

@@ -1,0 +1,326 @@
+<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Step 3: Read Alignment — Genomics Tutorial</title>
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+</head><body>
+<nav class="top-nav"><div class="top-nav-inner">
+  <a href="index.html" class="top-nav-brand"><span>🧬</span> <span data-zh="基因體學教學" data-en="Genomics Tutorial">基因體學教學</span></a>
+  <ul class="top-nav-links"><li><a href="sequencing.html">Seq</a></li><li><a href="qc.html">QC</a></li><li><a href="alignment.html" class="active">Align</a></li><li><a href="postalign.html">PostAlign</a></li><li><a href="variant-calling.html">VarCall</a></li><li><a href="annotation.html">Annot</a></li><li><a href="sv-cnv.html">SV/CNV</a></li><li><a href="rnaseq.html">RNA-seq</a></li><li><a href="chip-atac.html">ChIP/ATAC</a></li><li><a href="methylation.html">Methyl</a></li><li><a href="gwas.html">GWAS</a></li><li><a href="popgen.html">PopGen</a></li><li><a href="enrichment.html">Enrich</a></li><li><a href="workflow.html">Pipeline</a></li>
+    <li><a href="references/index.html" data-zh="📚 參考資料" data-en="📚 References">📚 參考資料</a></li>
+  </ul>
+</div></nav>
+<div class="progress-bar-container"><div class="progress-bar" id="progressBar"></div></div>
+<header class="page-hero"><div class="step-badge">STEP 3 / 14</div>
+<h1 data-zh="序列比對 (Read Alignment)" data-en="Read Alignment">序列比對 (Read Alignment)</h1>
+<p class="subtitle" data-lang="zh">把每一條 read 放回基因組正確位置——理解 BWA、STAR、Minimap2 各自的最佳場景。</p>
+<p class="subtitle" data-lang="en">Place each read back on the reference — understand when to use BWA, STAR, or Minimap2.</p>
+</header>
+<main class="content-wrap">
+
+<section class="section">
+<div class="section-label" data-zh="概覽" data-en="OVERVIEW">概覽</div>
+<h2 data-zh="為什麼比對是 NGS 的核心？" data-en="Why alignment is the heart of NGS">為什麼比對是 NGS 的核心？</h2>
+<div data-lang="zh">
+<p>從 FASTQ 進入有意義的生物學，必須先回答一個問題：<strong>「這條 read 來自基因組哪個位置？」</strong>。比對演算法面對的挑戰是：基因組有 3 Gb，每個 read 30 億選一；而且 read 可能有 sequencing error、SNP、indel，甚至跨越 splice junction（RNA-seq）。</p>
+<p>下游的所有 metric（mapping quality、coverage、variant evidence、splice junction、SV breakpoint）都建立在比對結果之上。<strong>選錯比對工具或參數，後面再厲害的軟體也救不回來</strong>。</p>
+</div>
+<div data-lang="en">
+<p>To extract biology from FASTQ, you must answer: <strong>"Where in the genome did this read come from?"</strong> The challenge: 3 Gb genome, billion-to-one position selection, with reads carrying sequencing errors, SNPs, indels, even splice junctions (RNA-seq).</p>
+<p>Every downstream metric (mapping quality, coverage, variant evidence, splice junctions, SV breakpoints) builds on alignment. <strong>Wrong aligner or parameters = no software downstream can save you</strong>.</p>
+</div>
+<div class="callout tip"><span class="callout-icon">💡</span><div>
+<span data-lang="zh"><strong>核心原則：</strong>DNA → BWA-MEM2 (短) 或 Minimap2 (長)；RNA → STAR 或 HISAT2 (考慮 splice)；偽比對 (pseudo-alignment) → Salmon (RNA 計數最快)。</span>
+<span data-lang="en"><strong>Core principle:</strong> DNA → BWA-MEM2 (short) or Minimap2 (long); RNA → STAR or HISAT2 (splice-aware); pseudo-alignment → Salmon (fastest RNA quantification).</span>
+</div></div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="工具比較" data-en="ALIGNERS">工具比較</div>
+<h2 data-zh="一、主流比對工具" data-en="I. Mainstream Aligners">一、主流比對工具</h2>
+
+<div class="card-grid cols-2">
+<div class="card"><div class="card-icon">🎯</div><h4>BWA-MEM2</h4>
+<div data-lang="zh"><p>短讀長 DNA 比對的事實標準。<strong>BWT-FM index + Maximal Exact Match (MEM)</strong> 演算法，產生與 BWA-MEM 完全相同的結果，但速度快 1.3–3× 且記憶體更省。2025 主流 pipeline（nf-core/sarek、GATK best practices）預設使用。</p></div>
+<div data-lang="en"><p>De facto standard for short-read DNA alignment. <strong>BWT-FM index + Maximal Exact Match (MEM)</strong>; produces identical results to BWA-MEM but 1.3–3× faster with smaller memory footprint. Default in 2025 mainstream pipelines (nf-core/sarek, GATK best practices).</p></div>
+</div>
+<div class="card"><div class="card-icon">⭐</div><h4>STAR</h4>
+<div data-lang="zh"><p>RNA-seq 短讀長首選。<strong>splice-aware</strong>——使用 suffix array 同時尋找 splice junction。<strong>強項：</strong>準確、可輸出 chimeric reads (fusion detection)、可 2-pass 模式提升新 splice 偵測。<strong>弱項：</strong>記憶體消耗大（人類 ~30 GB）。</p></div>
+<div data-lang="en"><p>Top choice for short-read RNA-seq. <strong>Splice-aware</strong> via suffix array. <strong>Strengths:</strong> accurate, outputs chimeric reads (fusion detection), 2-pass mode improves novel junction discovery. <strong>Weakness:</strong> high memory (~30 GB for human).</p></div>
+</div>
+<div class="card"><div class="card-icon">🚀</div><h4>HISAT2</h4>
+<div data-lang="zh"><p>另一個 splice-aware RNA-seq 比對器，使用 Graph FM index 與 hierarchical FM。<strong>記憶體效率高</strong>（~8 GB），雖然準確度比 STAR 略低，仍是低資源環境的好選擇；也支援 DNA 比對。</p></div>
+<div data-lang="en"><p>Alternative splice-aware aligner using Graph FM index + hierarchical FM. <strong>Memory efficient</strong> (~8 GB); accuracy slightly below STAR but excellent for resource-limited setups; also supports DNA.</p></div>
+</div>
+<div class="card"><div class="card-icon">🏹</div><h4>Minimap2</h4>
+<div data-lang="zh"><p>長讀長（ONT、PacBio）比對王者。<strong>minimizer-based seed + chaining</strong> 演算法；同一工具支援 DNA、RNA、assembly-to-genome、long-read overlap。當前 ONT 與 PacBio 官方推薦。也能比 short-read，但通常 BWA-MEM2 更快。</p></div>
+<div data-lang="en"><p>King of long-read alignment (ONT, PacBio). <strong>Minimizer seed + chaining</strong>; single tool supports DNA, RNA, assembly-to-genome, long-read overlap. Officially recommended by ONT and PacBio. Can align short reads but BWA-MEM2 is usually faster.</p></div>
+</div>
+<div class="card"><div class="card-icon">🏁</div><h4>Bowtie2</h4>
+<div data-lang="zh"><p>輕量、低資源的選擇。<strong>FM-index based</strong>，對 short reads（≤ 50 bp）特別友善。<strong>ChIP-seq / ATAC-seq</strong> 仍常見其身影（包含 ENCODE pipeline）。BWA-MEM2 對 ≥ 70 bp 通常更準確。</p></div>
+<div data-lang="en"><p>Lightweight, low-resource choice. <strong>FM-index based</strong>; especially friendly to short reads (≤ 50 bp). Still common in <strong>ChIP-seq / ATAC-seq</strong> (including ENCODE pipelines). BWA-MEM2 is usually more accurate for ≥ 70 bp.</p></div>
+</div>
+<div class="card"><div class="card-icon">⚡</div><h4>Salmon / kallisto (pseudo-alignment)</h4>
+<div data-lang="zh"><p>RNA-seq 計數的「跳過比對」捷徑。直接將 reads 映射到 transcriptome k-mer index，輸出 transcript-level 計數。<strong>速度比 STAR 快 10–100×</strong>，但不輸出 BAM；用於下游 DE 分析、不適合 fusion / SV / variant calling。</p></div>
+<div data-lang="en"><p>"Skip alignment" shortcut for RNA-seq quantification. Maps reads directly to transcriptome k-mer index, outputs transcript-level counts. <strong>10–100× faster than STAR</strong>; no BAM output. Use for DE; not suited for fusions/SV/variant calling.</p></div>
+</div>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="互動模擬" data-en="INTERACTIVE">互動模擬</div>
+<h2 data-zh="二、CIGAR 字串解碼器" data-en="II. CIGAR String Decoder">二、CIGAR 字串解碼器</h2>
+<div data-lang="zh"><p>CIGAR 描述 read 與 reference 的對齊操作：<code>M</code>=match/mismatch、<code>I</code>=insertion、<code>D</code>=deletion、<code>S</code>=soft clip、<code>N</code>=skip (intron)、<code>H</code>=hard clip。輸入一條 CIGAR 來看視覺化。</p></div>
+<div data-lang="en"><p>CIGAR describes the alignment operations between read and reference: <code>M</code>=match/mismatch, <code>I</code>=insertion, <code>D</code>=deletion, <code>S</code>=soft clip, <code>N</code>=skip (intron), <code>H</code>=hard clip. Enter a CIGAR to visualize.</p></div>
+
+<div class="interactive-panel">
+<div class="slider-group"><label><span data-zh="CIGAR 字串" data-en="CIGAR string">CIGAR</span> <span id="cigarLen"></span></label>
+<input type="text" id="cigarIn" value="3S20M2I15M1D10M5S" style="width:100%;padding:10px 14px;border:1px solid var(--c-border);border-radius:6px;font-family:var(--font-mono);font-size:.95rem">
+</div>
+<div class="toggle-row">
+  <button class="toggle-btn toggle-btn-sm" onclick="setCigar('30M')">30M (perfect)</button>
+  <button class="toggle-btn toggle-btn-sm" onclick="setCigar('3S20M2I15M1D10M5S')">soft-clip + indel</button>
+  <button class="toggle-btn toggle-btn-sm" onclick="setCigar('50M1000N50M')">RNA splice (N)</button>
+  <button class="toggle-btn toggle-btn-sm" onclick="setCigar('20M50S')">half soft-clip</button>
+</div>
+<div id="cigarViz" style="margin:20px 0;padding:16px;background:var(--c-surface-alt);border-radius:8px;font-family:var(--font-mono);font-size:.88rem;overflow-x:auto;white-space:nowrap"></div>
+<div id="cigarStats" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;font-size:.85rem"></div>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="關鍵概念" data-en="KEY CONCEPTS">關鍵概念</div>
+<h2 data-zh="三、SAM/BAM 必懂的欄位" data-en="III. Essential SAM/BAM Fields">三、SAM/BAM 必懂的欄位</h2>
+
+<div class="card-grid cols-2">
+<div class="card"><h4>FLAG (column 2)</h4>
+<div data-lang="zh"><p>bitwise flags 編碼 read 的狀態。常用：<br>• 4 = unmapped<br>• 16 = reverse strand<br>• 256 = secondary<br>• 1024 = duplicate<br>• 2048 = supplementary (split / chimeric)<br>用 <code>samtools flagstat</code> 一覽全樣本統計。</p></div>
+<div data-lang="en"><p>Bitwise flags encoding read state. Common:<br>• 4 = unmapped<br>• 16 = reverse strand<br>• 256 = secondary<br>• 1024 = duplicate<br>• 2048 = supplementary (split / chimeric)<br>Use <code>samtools flagstat</code> for a sample-wide summary.</p></div>
+</div>
+<div class="card"><h4>MAPQ (column 5)</h4>
+<div data-lang="zh"><p>Phred-scaled mapping quality：<strong>該 read 比對位置正確的機率</strong>。0 = 多重比對 (multi-mapping)、60 = unique。GATK 預設過濾 MAPQ &lt; 20。請注意各 aligner 對 MAPQ 上限有差（BWA 60, Bowtie2 42, STAR 255）。</p></div>
+<div data-lang="en"><p>Phred-scaled mapping quality: <strong>probability the alignment is correct</strong>. 0 = multi-mapping, 60 = unique. GATK filters MAPQ &lt; 20 by default. Note: aligners cap MAPQ differently (BWA 60, Bowtie2 42, STAR 255).</p></div>
+</div>
+<div class="card"><h4>TLEN / Insert Size (column 9)</h4>
+<div data-lang="zh"><p>paired-end 兩條 read 間的「外緣」距離。正常 Illumina 短 insert 200–600 bp。<strong>異常大 TLEN</strong> 暗示可能的 deletion / inversion；<strong>異常小或負值</strong> 暗示 inverted insert 或 dovetail。</p></div>
+<div data-lang="en"><p>"Outer" distance between paired-end reads. Normal Illumina insert is 200–600 bp. <strong>Abnormally large TLEN</strong> suggests possible deletions/inversions; <strong>tiny or negative values</strong> indicate inverted or dovetailed inserts.</p></div>
+</div>
+<div class="card"><h4>NM tag</h4>
+<div data-lang="zh"><p>read 與 reference 的編輯距離（mismatch + indel 鹼基數）。配合 CIGAR 可推算 mismatch 數。SV/variant pipeline 常用此 tag 過濾雜訊比對。</p></div>
+<div data-lang="en"><p>Edit distance between read and reference (mismatches + indel bases). Combined with CIGAR, lets you derive mismatch counts. SV/variant pipelines often filter noisy alignments by this tag.</p></div>
+</div>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="決策引導" data-en="DECISION GUIDE">決策引導</div>
+<h2 data-zh="四、比對工具選擇" data-en="IV. Aligner Selection">四、比對工具選擇</h2>
+<div class="decision-tree">
+<h4>🌳 <span data-zh="比對工具決策樹" data-en="Aligner Decision Tree">比對工具決策樹</span></h4>
+<div data-lang="zh">
+<div class="dt-node"><span class="dt-q">Q1:</span><div>讀長 &gt; 500 bp（ONT / PacBio）？<span class="dt-arrow">→ 是 →</span> <strong>Minimap2</strong>（DNA 用 <code>-ax map-ont</code> 或 <code>-ax map-hifi</code>；RNA 用 <code>-ax splice</code>）</div></div>
+<div class="dt-node"><span class="dt-q">Q2:</span><div>RNA-seq 短讀長且需要 BAM（fusion / variant / coverage）？<span class="dt-arrow">→ 是 →</span> <strong>STAR</strong> 2-pass</div></div>
+<div class="dt-node"><span class="dt-q">Q3:</span><div>RNA-seq 只需要 gene/transcript 計數，且記憶體有限？<span class="dt-arrow">→ 是 →</span> <strong>Salmon</strong>（quasi-mapping）</div></div>
+<div class="dt-node"><span class="dt-q">Q4:</span><div>DNA / WGS / WES？<span class="dt-arrow">→ 是 →</span> <strong>BWA-MEM2</strong>（drop-in 取代 BWA-MEM）</div></div>
+<div class="dt-node"><span class="dt-q">Q5:</span><div>ChIP-seq / ATAC-seq 短讀長？<span class="dt-arrow">→ 是 →</span> <strong>Bowtie2</strong> 或 BWA-MEM2 都可（ENCODE 標準為 Bowtie2）</div></div>
+</div>
+<div data-lang="en">
+<div class="dt-node"><span class="dt-q">Q1:</span><div>Read &gt; 500 bp (ONT / PacBio)? <span class="dt-arrow">→ Yes →</span> <strong>Minimap2</strong> (DNA: <code>-ax map-ont</code> / <code>-ax map-hifi</code>; RNA: <code>-ax splice</code>)</div></div>
+<div class="dt-node"><span class="dt-q">Q2:</span><div>Short-read RNA-seq, need BAM (fusion / variant / coverage)? <span class="dt-arrow">→ Yes →</span> <strong>STAR</strong> 2-pass</div></div>
+<div class="dt-node"><span class="dt-q">Q3:</span><div>RNA-seq, only need gene/transcript counts, limited memory? <span class="dt-arrow">→ Yes →</span> <strong>Salmon</strong> (quasi-mapping)</div></div>
+<div class="dt-node"><span class="dt-q">Q4:</span><div>DNA / WGS / WES? <span class="dt-arrow">→ Yes →</span> <strong>BWA-MEM2</strong> (drop-in for BWA-MEM)</div></div>
+<div class="dt-node"><span class="dt-q">Q5:</span><div>Short-read ChIP-seq / ATAC-seq? <span class="dt-arrow">→ Yes →</span> <strong>Bowtie2</strong> or BWA-MEM2 (ENCODE standard: Bowtie2)</div></div>
+</div>
+</div>
+
+<div class="callout warn"><span class="callout-icon">⚠️</span><div>
+<span data-lang="zh"><strong>常見陷阱：</strong>① 把 RNA-seq 直接丟給 BWA-MEM2 → 跨 splice 的 reads 全 soft-clip 丟失；② STAR index 沒帶 <code>--sjdbGTFfile</code>（GTF）→ 失去已知 junction 加速；③ 比對到 Decoy 序列卻沒過濾 unmapped → 下游 coverage 失準。</span>
+<span data-lang="en"><strong>Common pitfalls:</strong> ① Feeding RNA-seq directly to BWA-MEM2 → reads spanning splice junctions are soft-clipped away; ② STAR index without <code>--sjdbGTFfile</code> → loses known-junction acceleration; ③ Aligning to decoy sequences without filtering unmapped → corrupts downstream coverage.</span>
+</div></div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="程式碼" data-en="CODE">程式碼</div>
+<h2 data-zh="比對實作範例" data-en="Alignment Examples">比對實作範例</h2>
+<div class="code-tabs">
+<div class="code-tab-btns">
+  <button class="code-tab-btn active" onclick="switchTab(this,'b1')">Bash (BWA/STAR/Minimap2)</button>
+  <button class="code-tab-btn" onclick="switchTab(this,'p1')">Python (pysam)</button>
+  <button class="code-tab-btn" onclick="switchTab(this,'r1')">R (Rsamtools)</button>
+  <button class="code-tab-btn" onclick="switchTab(this,'nf1')">Nextflow</button>
+</div>
+<div class="code-tab-content active" id="b1"><pre><span class="comment"># --- BWA-MEM2 (DNA, paired-end Illumina) ---</span>
+<span class="comment"># 1. 建立 index（一次性）/ Build index (one-time)</span>
+bwa-mem2 index -p ref/hg38 ref/hg38.fa
+
+<span class="comment"># 2. 比對 + 直接排序 / Align + sort in one pipe</span>
+bwa-mem2 mem -t <span class="num">16</span> -R <span class="str">"@RG\tID:S1\tSM:S1\tLB:lib1\tPL:ILLUMINA"</span> \
+    ref/hg38 trim_R1.fq.gz trim_R2.fq.gz | \
+  samtools sort -@ <span class="num">8</span> -o S1.sorted.bam -
+samtools index S1.sorted.bam
+samtools flagstat S1.sorted.bam
+
+<span class="comment"># --- STAR (RNA-seq, 2-pass) ---</span>
+STAR --runMode genomeGenerate \
+     --genomeDir star_idx \
+     --genomeFastaFiles ref/hg38.fa \
+     --sjdbGTFfile ref/gencode.v45.gtf \
+     --sjdbOverhang <span class="num">100</span> --runThreadN <span class="num">16</span>
+
+STAR --runMode alignReads \
+     --genomeDir star_idx \
+     --readFilesIn trim_R1.fq.gz trim_R2.fq.gz --readFilesCommand zcat \
+     --twopassMode Basic \
+     --outSAMtype BAM SortedByCoordinate \
+     --outSAMstrandField intronMotif \
+     --outFileNamePrefix S1. --runThreadN <span class="num">16</span>
+
+<span class="comment"># --- Minimap2 (long reads) ---</span>
+<span class="comment"># ONT DNA</span>
+minimap2 -ax map-ont -t <span class="num">16</span> ref/hg38.fa nanopore.fq.gz | samtools sort -o ont.bam
+<span class="comment"># PacBio HiFi DNA</span>
+minimap2 -ax map-hifi -t <span class="num">16</span> ref/hg38.fa hifi.fq.gz | samtools sort -o hifi.bam
+<span class="comment"># long-read RNA</span>
+minimap2 -ax splice -uf -k14 ref/hg38.fa rna.ont.fq | samtools sort -o rna.ont.bam</pre></div>
+
+<div class="code-tab-content" id="p1"><pre><span class="comment"># 用 pysam 走訪 BAM / Iterate BAM with pysam</span>
+<span class="kw">import</span> pysam
+
+bam = pysam.AlignmentFile(<span class="str">"S1.sorted.bam"</span>, <span class="str">"rb"</span>)
+
+<span class="comment"># 統計 MAPQ 分佈 / MAPQ distribution</span>
+<span class="kw">from</span> collections <span class="kw">import</span> Counter
+mapq = Counter()
+<span class="kw">for</span> read <span class="kw">in</span> bam.fetch(<span class="str">"chr1"</span>, <span class="num">1000000</span>, <span class="num">2000000</span>):
+    <span class="kw">if</span> <span class="kw">not</span> read.is_unmapped:
+        mapq[read.mapping_quality] += <span class="num">1</span>
+<span class="func">print</span>(<span class="func">sorted</span>(mapq.items()))
+
+<span class="comment"># 計算 region 的覆蓋深度 / Per-base coverage</span>
+cov = bam.count_coverage(<span class="str">"chr1"</span>, <span class="num">1000000</span>, <span class="num">1000100</span>)
+total = [<span class="func">sum</span>(b) <span class="kw">for</span> b <span class="kw">in</span> <span class="func">zip</span>(*cov)]
+<span class="func">print</span>(<span class="str">f"Mean cov: {sum(total)/len(total):.1f}×"</span>)
+
+<span class="comment"># 篩選 split reads（SV 訊號）/ Filter split reads (SV signal)</span>
+<span class="kw">for</span> read <span class="kw">in</span> bam.fetch():
+    <span class="kw">if</span> read.has_tag(<span class="str">"SA"</span>):     <span class="comment"># supplementary alignment</span>
+        <span class="func">print</span>(read.query_name, read.reference_start, read.get_tag(<span class="str">"SA"</span>))</pre></div>
+
+<div class="code-tab-content" id="r1"><pre><span class="comment"># Rsamtools / GenomicAlignments</span>
+<span class="func">library</span>(Rsamtools)
+<span class="func">library</span>(GenomicAlignments)
+
+<span class="comment"># 讀取部分 BAM 為 GRanges / Read partial BAM as GRanges</span>
+param &lt;- <span class="func">ScanBamParam</span>(
+  which = <span class="func">GRanges</span>(<span class="str">"chr1"</span>, <span class="func">IRanges</span>(<span class="num">1e6</span>, <span class="num">2e6</span>)),
+  what  = <span class="func">c</span>(<span class="str">"qname"</span>, <span class="str">"flag"</span>, <span class="str">"mapq"</span>, <span class="str">"cigar"</span>, <span class="str">"isize"</span>)
+)
+aln &lt;- <span class="func">readGAlignments</span>(<span class="str">"S1.sorted.bam"</span>, param = param)
+<span class="func">summary</span>(<span class="func">mapq</span>(aln))
+
+<span class="comment"># MAPQ 直方圖</span>
+<span class="func">hist</span>(<span class="func">mapq</span>(aln), breaks = <span class="num">50</span>, main = <span class="str">"MAPQ distribution"</span>,
+     xlab = <span class="str">"MAPQ"</span>, col = <span class="str">"steelblue"</span>)</pre></div>
+
+<div class="code-tab-content" id="nf1"><pre><span class="comment">// BWA-MEM2 + sort in a single Nextflow process</span>
+<span class="kw">process</span> BWAMEM2 {
+  tag <span class="str">"$meta.id"</span>
+  cpus <span class="num">16</span>; memory <span class="str">'48 GB'</span>
+
+  input:
+    tuple val(meta), path(reads)
+    path  index
+    path  fasta
+
+  output:
+    tuple val(meta), path(<span class="str">"*.sorted.bam"</span>), path(<span class="str">"*.bai"</span>), emit: bam
+
+  script:
+  <span class="kw">def</span> rg = <span class="str">"@RG\\\\tID:${meta.id}\\\\tSM:${meta.sample}\\\\tLB:${meta.lib}\\\\tPL:ILLUMINA"</span>
+  <span class="str">"""
+  bwa-mem2 mem -t ${task.cpus} -R "${rg}" ${index}/hg38 ${reads[0]} ${reads[1]} \\
+    | samtools sort -@ 4 -o ${meta.id}.sorted.bam -
+  samtools index ${meta.id}.sorted.bam
+  """</span>
+}
+
+<span class="comment">// Or use nf-core modules:</span>
+<span class="comment">// include { BWAMEM2_MEM } from '../modules/nf-core/bwamem2/mem/main'</span></pre></div>
+</div>
+</section>
+
+<section class="quiz-section">
+<h3>📝 <span data-zh="自我檢測" data-en="Self-Check">自我檢測</span></h3>
+<div class="quiz-q" data-answer="1">
+<p data-lang="zh">1. RNA-seq 比對時應該使用？</p>
+<p data-lang="en">1. For RNA-seq alignment you should use?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. BWA-MEM2（最快的 DNA aligner）</span><span data-lang="en">A. BWA-MEM2 (fastest DNA aligner)</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. STAR 或 HISAT2（splice-aware）</span><span data-lang="en">B. STAR or HISAT2 (splice-aware)</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. Bowtie2（ENCODE 標準）</span><span data-lang="en">C. Bowtie2 (ENCODE standard)</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. Minimap2（長讀長之王）</span><span data-lang="en">D. Minimap2 (long-read king)</span></div>
+</div><div class="quiz-feedback" id="fb1"></div></div>
+
+<div class="quiz-q" data-answer="2">
+<p data-lang="zh">2. CIGAR 字串 "5S95M" 代表什麼？</p>
+<p data-lang="en">2. What does CIGAR "5S95M" mean?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. 完全比對 100 bp</span><span data-lang="en">A. Perfect 100 bp match</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. 5 bp insertion + 95 bp match</span><span data-lang="en">B. 5 bp insertion + 95 bp match</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. 前 5 bp soft-clip（不貼於 ref）+ 95 bp 比對</span><span data-lang="en">C. 5 bp soft-clip (not aligned to ref) + 95 bp aligned</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. 5 bp 跳過 (intron) + 95 bp match</span><span data-lang="en">D. 5 bp skip (intron) + 95 bp match</span></div>
+</div><div class="quiz-feedback" id="fb2"></div></div>
+
+<div class="quiz-q" data-answer="0">
+<p data-lang="zh">3. MAPQ = 0 代表？</p>
+<p data-lang="en">3. MAPQ = 0 means?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. read 比對到多個等可能位置（multi-mapping）</span><span data-lang="en">A. Multi-mapping — read aligns equally well to multiple locations</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. read 完全沒比對上</span><span data-lang="en">B. Read is unmapped</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. read 品質為 0</span><span data-lang="en">C. Read quality is zero</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. 比對極為可信</span><span data-lang="en">D. Alignment is extremely confident</span></div>
+</div><div class="quiz-feedback" id="fb3"></div></div>
+</section>
+
+<nav class="page-nav">
+<a href="qc.html"><span class="nav-dir" data-zh="← 上一步" data-en="← Previous">← 上一步</span><span class="nav-title" data-zh="Step 2: 原始數據品質管控與 Trimming" data-en="Step 2: Raw Data QC &amp; Trimming">Step 2: 原始數據品質管控與 Trimming</span></a>
+<a href="postalign.html"><span class="nav-dir" data-zh="下一步 →" data-en="Next →">下一步 →</span><span class="nav-title" data-zh="Step 4: 比對後處理 (Post-Alignment Processing)" data-en="Step 4: Post-Alignment Processing">Step 4: 比對後處理 (Post-Alignment Processing)</span></a>
+</nav>
+</main>
+<footer class="site-footer">© Charlene — Genomics Interactive Tutorial</footer>
+<script src="i18n.js"></script>
+<script>
+window.addEventListener('scroll',()=>{const h=document.documentElement;document.getElementById('progressBar').style.width=(h.scrollTop/(h.scrollHeight-h.clientHeight))*100+'%';});
+function switchTab(b,id){const p=b.closest('.code-tabs');p.querySelectorAll('.code-tab-btn').forEach(x=>x.classList.remove('active'));p.querySelectorAll('.code-tab-content').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.getElementById(id).classList.add('active');}
+
+// CIGAR parser & visualizer
+function parseCigar(s){const re=/(\d+)([MIDNSHP=X])/g;const ops=[];let m;while((m=re.exec(s))!==null)ops.push({len:+m[1],op:m[2]});return ops;}
+const opColors={M:'#1a6b5a',I:'#d4a03c',D:'#c0392b',N:'#888',S:'#aaa',H:'#666','=':'#1a6b5a',X:'#c0392b',P:'#bbb'};
+const opNames={M:'Match/Mismatch',I:'Insertion',D:'Deletion',N:'Skip (intron)',S:'Soft clip',H:'Hard clip','=':'Match','X':'Mismatch',P:'Pad'};
+function setCigar(c){document.getElementById('cigarIn').value=c;renderCigar();}
+function renderCigar(){
+  const c=document.getElementById('cigarIn').value.trim();
+  const ops=parseCigar(c);
+  let readLen=0, refLen=0;
+  ops.forEach(o=>{if('MIS=X'.includes(o.op))readLen+=o.len;if('MDN=X'.includes(o.op))refLen+=o.len;});
+  // build bar visualization
+  const total=Math.max(readLen,refLen);
+  let html='<div style="display:flex;gap:2px;align-items:center;margin-bottom:8px;font-size:.78rem;color:var(--c-ink-muted)"><span style="min-width:60px">read:</span>';
+  ops.forEach(o=>{const w=(o.len/total)*100;const bg=opColors[o.op]||'#888';if('MIS=X'.includes(o.op))html+=`<span style="display:inline-block;width:${Math.max(2,w*4)}px;height:18px;background:${bg};color:#fff;text-align:center;font-size:.7rem;line-height:18px">${o.len}${o.op}</span>`;else html+=`<span style="display:inline-block;width:${Math.max(2,w*4)}px;height:18px;background:repeating-linear-gradient(45deg,#eee,#eee 4px,#fff 4px,#fff 8px);color:#888;text-align:center;font-size:.7rem;line-height:18px">·</span>`;});
+  html+='</div><div style="display:flex;gap:2px;align-items:center;font-size:.78rem;color:var(--c-ink-muted)"><span style="min-width:60px">ref:</span>';
+  ops.forEach(o=>{const w=(o.len/total)*100;const bg=opColors[o.op]||'#888';if('MDN=X'.includes(o.op))html+=`<span style="display:inline-block;width:${Math.max(2,w*4)}px;height:18px;background:${bg};color:#fff;text-align:center;font-size:.7rem;line-height:18px">${o.len}${o.op}</span>`;else html+=`<span style="display:inline-block;width:${Math.max(2,w*4)}px;height:18px;background:repeating-linear-gradient(45deg,#eee,#eee 4px,#fff 4px,#fff 8px);color:#888;text-align:center;font-size:.7rem;line-height:18px">·</span>`;});
+  html+='</div>';
+  document.getElementById('cigarViz').innerHTML=html;
+  document.getElementById('cigarLen').textContent='(read '+readLen+' bp / ref '+refLen+' bp)';
+  // legend / stats
+  const seen={};ops.forEach(o=>{seen[o.op]=(seen[o.op]||0)+o.len;});
+  let stats='';for(const op in seen){stats+=`<span class="sim-stat pass" style="background:${opColors[op]||'#888'};color:#fff">${op} ${opNames[op]}: ${seen[op]}</span>`;}
+  document.getElementById('cigarStats').innerHTML=stats;
+}
+document.getElementById('cigarIn').addEventListener('input',renderCigar);
+renderCigar();
+
+// Quiz
+const QF={zh:{q1_y:'RNA-seq 必須用 splice-aware aligner，才能正確處理 exon-exon junction。',q1_n:'正確答案已標示。',q2_y:'S = soft clip，不貼於 reference 但保留在 read 序列中。',q2_n:'正確答案已標示。',q3_y:'MAPQ 0 表示 aligner 無法區分多個等可能位置；非「未比對」（那是 FLAG 4）。',q3_n:'正確答案已標示。'},en:{q1_y:'RNA-seq must use a splice-aware aligner to handle exon-exon junctions.',q1_n:'Correct answer highlighted.',q2_y:'S = soft clip — present in read sequence but not aligned to reference.',q2_n:'Correct answer highlighted.',q3_y:'MAPQ 0 means the aligner can\\'t pick a unique location (multi-mapping); unmapped is FLAG 4.',q3_n:'Correct answer highlighted.'}};
+document.querySelectorAll('.quiz-q').forEach((q,qi)=>{const ans=+q.dataset.answer;q.querySelectorAll('.quiz-opt').forEach(o=>{o.addEventListener('click',()=>{if(q.classList.contains('answered'))return;q.classList.add('answered');const fb=document.getElementById('fb'+(qi+1));const ok=+o.dataset.idx===ans;o.classList.add(ok?'correct':'wrong');if(!ok)q.querySelectorAll('.quiz-opt')[ans].classList.add('correct');const L=I18n.get();fb.className='quiz-feedback show '+(ok?'correct-fb':'wrong-fb');fb.textContent=(ok?'✅ ':'❌ ')+(QF[L]['q'+(qi+1)+'_'+(ok?'y':'n')]||'');});});});
+</script>
+</body></html>

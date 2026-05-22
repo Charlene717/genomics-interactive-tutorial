@@ -1,0 +1,312 @@
+<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Step 4: Post-Alignment Processing — Genomics Tutorial</title>
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+</head><body>
+<nav class="top-nav"><div class="top-nav-inner">
+  <a href="index.html" class="top-nav-brand"><span>🧬</span> <span data-zh="基因體學教學" data-en="Genomics Tutorial">基因體學教學</span></a>
+  <ul class="top-nav-links"><li><a href="sequencing.html">Seq</a></li><li><a href="qc.html">QC</a></li><li><a href="alignment.html">Align</a></li><li><a href="postalign.html" class="active">PostAlign</a></li><li><a href="variant-calling.html">VarCall</a></li><li><a href="annotation.html">Annot</a></li><li><a href="sv-cnv.html">SV/CNV</a></li><li><a href="rnaseq.html">RNA-seq</a></li><li><a href="chip-atac.html">ChIP/ATAC</a></li><li><a href="methylation.html">Methyl</a></li><li><a href="gwas.html">GWAS</a></li><li><a href="popgen.html">PopGen</a></li><li><a href="enrichment.html">Enrich</a></li><li><a href="workflow.html">Pipeline</a></li>
+    <li><a href="references/index.html" data-zh="📚 參考資料" data-en="📚 References">📚 參考資料</a></li>
+  </ul>
+</div></nav>
+<div class="progress-bar-container"><div class="progress-bar" id="progressBar"></div></div>
+<header class="page-hero"><div class="step-badge">STEP 4 / 14</div>
+<h1 data-zh="比對後處理 (Post-Alignment Processing)" data-en="Post-Alignment Processing">比對後處理</h1>
+<p class="subtitle" data-lang="zh">排序、標記重複、品質校正——讓 BAM 變成「乾淨」的變異呼叫輸入。</p>
+<p class="subtitle" data-lang="en">Sort, mark duplicates, recalibrate — turn raw BAM into clean input for variant calling.</p>
+</header>
+<main class="content-wrap">
+
+<section class="section">
+<div class="section-label" data-zh="概覽" data-en="OVERVIEW">概覽</div>
+<h2 data-zh="為什麼比對後不能直接呼叫變異？" data-en="Why can't we call variants right after alignment?">為什麼比對後不能直接呼叫變異？</h2>
+<div data-lang="zh">
+<p>剛從 aligner 出來的 BAM 充滿「假訊號」：PCR duplicates 重複計入同一條 DNA 分子、定序儀的系統性 quality miscalibration、Indel 附近的軟對齊錯誤。<strong>不處理這些</strong>，HaplotypeCaller 會被假 evidence 騙到 false positive 暴增。</p>
+<p>GATK Best Practices 把比對後處理視為「四個必做步驟」：<strong>Sort → MarkDuplicates → BQSR → Index</strong>。其中 BQSR（Base Quality Score Recalibration）對 SNV 精確度影響特別大；DRAGEN/DeepVariant 在 2025 後逐漸把這一步「內建」進演算法。</p>
+</div>
+<div data-lang="en">
+<p>Fresh BAM from an aligner carries fake signal: PCR duplicates double-count the same DNA molecule, systematic miscalibration of base qualities, soft-alignment errors near indels. <strong>Without cleanup</strong>, HaplotypeCaller is tricked by spurious evidence — false positives spike.</p>
+<p>GATK Best Practices defines four mandatory post-alignment steps: <strong>Sort → MarkDuplicates → BQSR → Index</strong>. BQSR especially boosts SNV precision; DRAGEN/DeepVariant in 2025 increasingly "absorb" this step into the caller.</p>
+</div>
+<div class="callout tip"><span class="callout-icon">💡</span><div>
+<span data-lang="zh"><strong>核心原則：</strong>順序很重要！ <strong>Sort → Mark Duplicates → BQSR</strong>。BQSR 必須在 dup-mark 後做，否則 PCR duplicate 的偏誤會污染校正模型。</span>
+<span data-lang="en"><strong>Core principle:</strong> Order matters! <strong>Sort → Mark Duplicates → BQSR</strong>. BQSR must come after duplicate marking, otherwise PCR duplicates contaminate the recalibration model.</span>
+</div></div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="核心步驟" data-en="CORE STEPS">核心步驟</div>
+<h2 data-zh="一、四個必做步驟" data-en="I. The Four Mandatory Steps">一、四個必做步驟</h2>
+<div class="card-grid cols-2">
+<div class="card"><div class="card-icon">📚</div><h4>1. Sort by coordinate</h4>
+<div data-lang="zh"><p>按染色體位置排序 BAM。<strong>幾乎所有下游工具（MarkDuplicates、HaplotypeCaller、bcftools）都要求 coordinate-sorted BAM</strong>。aligner 輸出本來是「read order」，必須先 sort。<br>工具：<code>samtools sort -@ 8</code> 或 aligner pipe 直接接 sort。</p></div>
+<div data-lang="en"><p>Sort BAM by chromosome position. <strong>Almost every downstream tool (MarkDuplicates, HaplotypeCaller, bcftools) requires coordinate-sorted BAM</strong>. Aligner output is in read order; sort first.<br>Tools: <code>samtools sort -@ 8</code>, or pipe directly from aligner.</p></div>
+</div>
+<div class="card"><div class="card-icon">🪞</div><h4>2. Mark Duplicates</h4>
+<div data-lang="zh"><p><strong>PCR duplicate</strong>：同一個 DNA 分子被 PCR 放大多次後重複定序，造成假 evidence 累積。MarkDuplicates 不刪除而是<strong>標記</strong>（FLAG 1024），variant caller 自動忽略。<br>工具：<code>gatk MarkDuplicates</code> 或更快的 <code>gatk MarkDuplicatesSpark</code>、<code>samtools markdup</code>。</p></div>
+<div data-lang="en"><p><strong>PCR duplicates</strong>: the same molecule amplified and sequenced multiple times, inflating fake evidence. MarkDuplicates <strong>flags</strong> them (FLAG 1024) rather than removing — variant callers ignore flagged reads.<br>Tools: <code>gatk MarkDuplicates</code>, faster <code>MarkDuplicatesSpark</code>, or <code>samtools markdup</code>.</p></div>
+</div>
+<div class="card"><div class="card-icon">📏</div><h4>3. BQSR (Base Quality Score Recalibration)</h4>
+<div data-lang="zh"><p>定序儀回報的 Phred Q 常有系統性偏誤（某些 cycle、某些 context 高估或低估）。BQSR 利用「已知 variants」（dbSNP、Mills indel）建立 covariate 模型重新校正分數。<strong>對 SNV 精確度提升明顯</strong>，特別是低覆蓋深度時。<br>工具：<code>gatk BaseRecalibrator</code> + <code>ApplyBQSR</code>。</p></div>
+<div data-lang="en"><p>Reported Phred Q has systematic bias (some cycles/contexts over- or under-estimate). BQSR builds a covariate model using known variants (dbSNP, Mills indels) and recalibrates. <strong>Major precision boost for SNVs</strong>, especially at low coverage.<br>Tools: <code>gatk BaseRecalibrator</code> + <code>ApplyBQSR</code>.</p></div>
+</div>
+<div class="card"><div class="card-icon">🗂️</div><h4>4. Index</h4>
+<div data-lang="zh"><p>產生 <code>.bai</code> 索引讓 random access（IGV 視覺化、bcftools region query）成為可能。<strong>下游沒索引就無法 fetch 區域</strong>。<br>工具：<code>samtools index</code> 或 <code>gatk BuildBamIndex</code>。</p></div>
+<div data-lang="en"><p>Generate <code>.bai</code> index for random access (IGV viewing, bcftools region queries). <strong>No index = no region fetch downstream</strong>.<br>Tools: <code>samtools index</code> or <code>gatk BuildBamIndex</code>.</p></div>
+</div>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="互動模擬" data-en="INTERACTIVE">互動模擬</div>
+<h2 data-zh="二、Duplicate Rate 與覆蓋的關係" data-en="II. Duplicate Rate vs Coverage">二、Duplicate Rate 與覆蓋的關係</h2>
+<div data-lang="zh"><p>PCR duplicate 比例會隨「定序深度 ÷ library complexity」上升。當你深度測序但 library 複雜度不足，duplicate rate 會飆升而<strong>「有效深度」(unique reads) 反而停滯</strong>。拖動下方滑桿觀察。</p></div>
+<div data-lang="en"><p>PCR duplicate rate rises with "sequencing depth ÷ library complexity". Deep sequencing on a low-complexity library means duplicate rate explodes while <strong>effective depth (unique reads) plateaus</strong>. Try the sliders.</p></div>
+
+<div class="interactive-panel">
+<div class="sim-stats">
+  <span class="sim-stat pass" id="rawDepth">—</span>
+  <span class="sim-stat pass" id="uniqDepth">—</span>
+  <span class="sim-stat fail" id="dupRate">—</span>
+</div>
+<div class="slider-group"><label><span data-zh="名義定序深度 (Raw depth)" data-en="Nominal sequencing depth">名義深度</span> <span id="valDepth">30</span>×</label><input type="range" id="sliderDepth" min="5" max="200" value="30" step="5"></div>
+<div class="slider-group"><label><span data-zh="Library 複雜度 (unique 分子數，百萬)" data-en="Library complexity (unique molecules, M)">Library 複雜度</span> <span id="valLib">200</span>M</label><input type="range" id="sliderLib" min="20" max="800" value="200" step="20"></div>
+<div class="chart-container"><canvas id="dupChart"></canvas></div>
+<p style="font-size:.82rem;color:var(--c-ink-muted);text-align:center;" data-lang="zh">藍 = 原始覆蓋 | 綠 = 去重後 (有效) 覆蓋 | 紅 = duplicate 比例</p>
+<p style="font-size:.82rem;color:var(--c-ink-muted);text-align:center;" data-lang="en">Blue = raw coverage | Green = post-dedup (effective) | Red = duplicate rate</p>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="進階" data-en="ADVANCED">進階</div>
+<h2 data-zh="三、UMI 與分子定量" data-en="III. UMI & Molecular Quantification">三、UMI 與分子定量</h2>
+<div data-lang="zh">
+<p>傳統 dedup 只看 <strong>位置 + 鏈方向</strong>，無法區分「真正同一分子被多次測」與「兩個獨立分子恰好被剪在同一處」。<strong>UMI (Unique Molecular Identifier)</strong> 在 library prep 階段就為每個分子貼上唯一條碼，讓 dedup 變得真正可靠。</p>
+<p><strong>應用場景：</strong>cell-free DNA（ctDNA 低 VAF 變異）、scRNA-seq（10X Genomics）、低 input 樣本、qcRNA-seq（quasi count 校正）。<strong>工具：</strong>UMI-tools、fgbio、UMI-Reducer。</p>
+</div>
+<div data-lang="en">
+<p>Traditional dedup looks only at <strong>position + strand</strong>, so it can't distinguish "same molecule re-sequenced" from "two independent molecules happening to share a breakpoint". <strong>UMIs (Unique Molecular Identifiers)</strong> tag each molecule during library prep, making dedup truly reliable.</p>
+<p><strong>Use cases:</strong> cell-free DNA (low-VAF ctDNA variants), scRNA-seq (10X Genomics), low-input samples, quasi-count correction. <strong>Tools:</strong> UMI-tools, fgbio, UMI-Reducer.</p>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="決策引導" data-en="DECISION GUIDE">決策引導</div>
+<h2 data-zh="四、後處理策略決策" data-en="IV. Post-Processing Strategy">四、後處理策略決策</h2>
+<div class="decision-tree">
+<h4>🌳 <span data-zh="後處理策略" data-en="Post-Processing Strategy">後處理策略</span></h4>
+<div data-lang="zh">
+<div class="dt-node"><span class="dt-q">Q1:</span><div>WGS / WES 要做 germline variant calling？<span class="dt-arrow">→ 是 →</span> 完整 GATK 4 步：Sort → MarkDup → BQSR → Index</div></div>
+<div class="dt-node"><span class="dt-q">Q2:</span><div>使用 DeepVariant？<span class="dt-arrow">→ 是 →</span> 仍需 MarkDup，但<strong>不需要 BQSR</strong>（DeepVariant 內建 quality recalibration）。</div></div>
+<div class="dt-node"><span class="dt-q">Q3:</span><div>RNA-seq？<span class="dt-arrow">→ 是 →</span> <strong>不要 MarkDup</strong>！高表現基因會被誤判 duplicate；計數類 DE 通常跳過 dedup。例外：RNA 變異呼叫流程需要 MarkDup 但要小心。</div></div>
+<div class="dt-node"><span class="dt-q">Q4:</span><div>ChIP-seq？<span class="dt-arrow">→ 是 →</span> <strong>移除</strong> duplicates（peak 計數常因 dedup 而更乾淨）；ATAC-seq 也是。</div></div>
+<div class="dt-node"><span class="dt-q">Q5:</span><div>樣本有 UMI？<span class="dt-arrow">→ 是 →</span> 用 UMI-aware dedup（umi_tools dedup / fgbio CallMolecularConsensusReads），效果遠優於位置 dedup。</div></div>
+</div>
+<div data-lang="en">
+<div class="dt-node"><span class="dt-q">Q1:</span><div>WGS / WES germline variant calling? <span class="dt-arrow">→ Yes →</span> Full GATK 4 steps: Sort → MarkDup → BQSR → Index</div></div>
+<div class="dt-node"><span class="dt-q">Q2:</span><div>Using DeepVariant? <span class="dt-arrow">→ Yes →</span> Still mark duplicates, but <strong>skip BQSR</strong> (DeepVariant has internal quality recalibration).</div></div>
+<div class="dt-node"><span class="dt-q">Q3:</span><div>RNA-seq? <span class="dt-arrow">→ Yes →</span> <strong>Do not MarkDup</strong>! Highly expressed genes will be flagged as duplicates; standard DE pipelines skip dedup. Exception: RNA variant calling needs MarkDup but proceed carefully.</div></div>
+<div class="dt-node"><span class="dt-q">Q4:</span><div>ChIP-seq? <span class="dt-arrow">→ Yes →</span> <strong>Remove</strong> duplicates (cleans peak counts). Same for ATAC-seq.</div></div>
+<div class="dt-node"><span class="dt-q">Q5:</span><div>UMI-tagged samples? <span class="dt-arrow">→ Yes →</span> Use UMI-aware dedup (umi_tools dedup / fgbio CallMolecularConsensusReads) — vastly better than position dedup.</div></div>
+</div>
+</div>
+
+<div class="callout warn"><span class="callout-icon">⚠️</span><div>
+<span data-lang="zh"><strong>BQSR 不要做的場景：</strong>① 非人類且沒有可靠的 known-sites VCF；② 已用 DeepVariant；③ 比對深度極低（&lt; 5×）；④ amplicon-seq（強烈 enrichment 會誤導校正模型）。</span>
+<span data-lang="en"><strong>Skip BQSR when:</strong> ① Non-human without reliable known-sites VCF; ② Using DeepVariant; ③ Very low coverage (&lt; 5×); ④ Amplicon-seq (strong enrichment misleads recalibration).</span>
+</div></div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="程式碼" data-en="CODE">程式碼</div>
+<h2 data-zh="完整後處理流程" data-en="Complete Post-Processing Pipeline">完整後處理流程</h2>
+<div class="code-tabs">
+<div class="code-tab-btns">
+  <button class="code-tab-btn active" onclick="switchTab(this,'b1')">Bash (GATK)</button>
+  <button class="code-tab-btn" onclick="switchTab(this,'b2')">Bash (samtools / Spark)</button>
+  <button class="code-tab-btn" onclick="switchTab(this,'nf1')">Nextflow</button>
+</div>
+<div class="code-tab-content active" id="b1"><pre><span class="comment"># --- GATK 4 完整後處理 ---</span>
+<span class="comment"># 1. Mark Duplicates</span>
+gatk MarkDuplicates \
+    -I S1.sorted.bam \
+    -O S1.dedup.bam \
+    -M S1.dup.metrics.txt \
+    --VALIDATION_STRINGENCY LENIENT
+
+<span class="comment"># 2. BQSR — 建立 recalibration table</span>
+gatk BaseRecalibrator \
+    -I S1.dedup.bam \
+    -R ref/hg38.fa \
+    --known-sites ref/dbsnp.vcf.gz \
+    --known-sites ref/Mills_indels.vcf.gz \
+    -O S1.recal.table
+
+<span class="comment"># 3. ApplyBQSR — 套用校正</span>
+gatk ApplyBQSR \
+    -I S1.dedup.bam \
+    -R ref/hg38.fa \
+    --bqsr-recal-file S1.recal.table \
+    -O S1.recal.bam
+
+<span class="comment"># 4. Index</span>
+samtools index S1.recal.bam
+
+<span class="comment"># 5. 檢查（QC after BQSR）</span>
+gatk AnalyzeCovariates \
+    -bqsr S1.recal.table \
+    -plots S1.recal.pdf</pre></div>
+
+<div class="code-tab-content" id="b2"><pre><span class="comment"># --- samtools 路線（無 BQSR）---</span>
+samtools sort -@ <span class="num">16</span> -o S1.sorted.bam S1.bam
+samtools index S1.sorted.bam
+
+samtools markdup -@ <span class="num">16</span> -r S1.sorted.bam S1.dedup.bam     <span class="comment"># -r 真正移除（非標記）</span>
+samtools index S1.dedup.bam
+
+samtools flagstat S1.dedup.bam
+samtools stats   S1.dedup.bam | <span class="func">grep</span> ^SN | <span class="func">head</span> -<span class="num">20</span>
+
+<span class="comment"># --- MarkDuplicatesSpark（快 2–4×）---</span>
+gatk MarkDuplicatesSpark \
+    -I S1.sorted.bam \
+    -O S1.dedup.bam \
+    --conf <span class="str">'spark.executor.cores=16'</span>
+
+<span class="comment"># --- UMI-aware dedup（fgbio）---</span>
+fgbio GroupReadsByUmi -i S1.bam -o S1.grouped.bam -s adjacency
+fgbio CallMolecularConsensusReads -i S1.grouped.bam -o S1.consensus.bam -M <span class="num">1</span></pre></div>
+
+<div class="code-tab-content" id="nf1"><pre><span class="comment">// 完整後處理（含 BQSR）/ Full post-processing with BQSR</span>
+<span class="kw">workflow</span> POSTALIGN {
+  take: sorted_bam_ch
+        known_sites_ch
+        fasta_ch
+
+  main:
+    MARKDUP(sorted_bam_ch)
+    BQSR_TABLE(MARKDUP.out.bam, fasta_ch, known_sites_ch)
+    APPLY_BQSR(MARKDUP.out.bam, BQSR_TABLE.out.table, fasta_ch)
+
+  emit:
+    recal_bam = APPLY_BQSR.out.bam
+}
+
+<span class="kw">process</span> MARKDUP {
+  input:  tuple val(meta), path(bam)
+  output: tuple val(meta), path(<span class="str">"*.dedup.bam"</span>), path(<span class="str">"*.bai"</span>), emit: bam
+          path <span class="str">"*.metrics"</span>, emit: metrics
+  script:
+  <span class="str">"""
+  gatk MarkDuplicates -I ${bam} -O ${meta.id}.dedup.bam -M ${meta.id}.metrics
+  samtools index ${meta.id}.dedup.bam
+  """</span>
+}
+
+<span class="comment">// nf-core/sarek 已內建這整套；多用 it 比自寫穩定！</span>
+<span class="comment">// nextflow run nf-core/sarek --step prepare_recalibration ...</span></pre></div>
+</div>
+</section>
+
+<section class="quiz-section">
+<h3>📝 <span data-zh="自我檢測" data-en="Self-Check">自我檢測</span></h3>
+<div class="quiz-q" data-answer="1">
+<p data-lang="zh">1. 為什麼 RNA-seq 計數類流程通常不做 duplicate removal？</p>
+<p data-lang="en">1. Why do RNA-seq counting pipelines typically skip duplicate removal?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. RNA 沒有 PCR duplicate</span><span data-lang="en">A. RNA has no PCR duplicates</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. 高表現基因會被誤判為 duplicate，造成計數低估</span><span data-lang="en">B. Highly expressed genes get flagged as duplicates, causing count under-estimation</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. 工具不支援 RNA-seq</span><span data-lang="en">C. Tools don't support RNA-seq</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. RNA-seq 已經有 UMI</span><span data-lang="en">D. RNA-seq already has UMIs</span></div>
+</div><div class="quiz-feedback" id="fb1"></div></div>
+
+<div class="quiz-q" data-answer="2">
+<p data-lang="zh">2. BQSR 的正確執行順序？</p>
+<p data-lang="en">2. Correct order of BQSR steps?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. ApplyBQSR → BaseRecalibrator</span><span data-lang="en">A. ApplyBQSR → BaseRecalibrator</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. BaseRecalibrator → ApplyBQSR（且需 MarkDup 之前）</span><span data-lang="en">B. BaseRecalibrator → ApplyBQSR (before MarkDup)</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. MarkDup → BaseRecalibrator → ApplyBQSR</span><span data-lang="en">C. MarkDup → BaseRecalibrator → ApplyBQSR</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. 順序無所謂</span><span data-lang="en">D. Order doesn't matter</span></div>
+</div><div class="quiz-feedback" id="fb2"></div></div>
+
+<div class="quiz-q" data-answer="1">
+<p data-lang="zh">3. 使用 DeepVariant 呼叫變異時，後處理需要？</p>
+<p data-lang="en">3. When using DeepVariant for variant calling, post-processing should?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. 完整 Sort → MarkDup → BQSR → Index</span><span data-lang="en">A. Full Sort → MarkDup → BQSR → Index</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. Sort → MarkDup → Index（跳過 BQSR）</span><span data-lang="en">B. Sort → MarkDup → Index (skip BQSR)</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. 只需要 Sort 即可</span><span data-lang="en">C. Sort only</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. 不需要任何後處理</span><span data-lang="en">D. No post-processing needed</span></div>
+</div><div class="quiz-feedback" id="fb3"></div></div>
+</section>
+
+<nav class="page-nav">
+<a href="alignment.html"><span class="nav-dir" data-zh="← 上一步" data-en="← Previous">← 上一步</span><span class="nav-title" data-zh="Step 3: 序列比對 (Read Alignment)" data-en="Step 3: Read Alignment">Step 3: 序列比對 (Read Alignment)</span></a>
+<a href="variant-calling.html"><span class="nav-dir" data-zh="下一步 →" data-en="Next →">下一步 →</span><span class="nav-title" data-zh="Step 5: 變異呼叫 (SNV / Indel)" data-en="Step 5: Variant Calling (SNV / Indel)">Step 5: 變異呼叫 (SNV / Indel)</span></a>
+</nav>
+</main>
+<footer class="site-footer">© Charlene — Genomics Interactive Tutorial</footer>
+<script src="i18n.js"></script>
+<script>
+window.addEventListener('scroll',()=>{const h=document.documentElement;document.getElementById('progressBar').style.width=(h.scrollTop/(h.scrollHeight-h.clientHeight))*100+'%';});
+function switchTab(b,id){const p=b.closest('.code-tabs');p.querySelectorAll('.code-tab-btn').forEach(x=>x.classList.remove('active'));p.querySelectorAll('.code-tab-content').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.getElementById(id).classList.add('active');}
+
+// Coverage saturation curve (Lander-Waterman-like model)
+// As you sequence deeper, unique molecules saturate; dups = (raw - unique)/raw
+const dupChart=new Chart(document.getElementById('dupChart'),{
+  type:'line',
+  data:{labels:[],datasets:[
+    {label:'Raw depth',data:[],borderColor:'#3b82f6',backgroundColor:'rgba(59,130,246,.15)',fill:false,tension:.3,yAxisID:'y'},
+    {label:'Unique (effective) depth',data:[],borderColor:'#1a6b5a',backgroundColor:'rgba(26,107,90,.2)',fill:false,tension:.3,yAxisID:'y'},
+    {label:'Duplicate rate',data:[],borderColor:'#c0392b',borderDash:[6,4],fill:false,tension:.3,yAxisID:'y1'}
+  ]},
+  options:{responsive:true,maintainAspectRatio:false,scales:{
+    x:{title:{display:true,text:'Raw depth (×)'}},
+    y:{position:'left',title:{display:true,text:'Coverage (×)'},beginAtZero:true},
+    y1:{position:'right',title:{display:true,text:'Duplicate rate'},min:0,max:1,grid:{drawOnChartArea:false}}
+  },plugins:{legend:{position:'top'}}}
+});
+
+function updateDup(){
+  // Lander-Waterman style: P(unique read) = libComplexity * (1 - e^(-raw/libComplexity))
+  // Effective depth = libComplexity * (1 - e^(-rawDepth/libComplexity_normalized))
+  const raw=+document.getElementById('sliderDepth').value;
+  const lib=+document.getElementById('sliderLib').value;  // in millions of unique molecules
+  // genome ~3Gb, read 150bp → 1× = 20M reads
+  // unique fraction at given raw depth: lib_M / (raw * 20 / 1) per Lander-Waterman: U = L * (1 - e^(-N/L))
+  // simpler: U = lib * (1 - exp(-raw*20 / lib))
+  document.getElementById('valDepth').textContent=raw;
+  document.getElementById('valLib').textContent=lib;
+  const xs=[], rawArr=[], uniqArr=[], dupArr=[];
+  for(let d=2;d<=200;d+=4){
+    const totalReads = d*20; // M reads needed for d×
+    const uniqueReads = lib * (1 - Math.exp(-totalReads/lib));
+    const uniqDepth = uniqueReads / 20;
+    const dup = (totalReads - uniqueReads)/totalReads;
+    xs.push(d); rawArr.push(d); uniqArr.push(+uniqDepth.toFixed(2)); dupArr.push(+dup.toFixed(3));
+  }
+  dupChart.data.labels = xs;
+  dupChart.data.datasets[0].data = rawArr;
+  dupChart.data.datasets[1].data = uniqArr;
+  dupChart.data.datasets[2].data = dupArr;
+  dupChart.update('none');
+
+  // stats at current setting
+  const totalR = raw*20;
+  const uR = lib*(1-Math.exp(-totalR/lib));
+  const ud = uR/20;
+  const dr = (totalR-uR)/totalR;
+  const L=I18n.get();
+  document.getElementById('rawDepth').textContent=(L==='zh'?'名義: ':'Raw: ')+raw+'×';
+  document.getElementById('uniqDepth').textContent=(L==='zh'?'有效: ':'Effective: ')+ud.toFixed(1)+'×';
+  document.getElementById('dupRate').textContent=(L==='zh'?'Dup: ':'Dup: ')+(dr*100).toFixed(1)+'%';
+}
+['sliderDepth','sliderLib'].forEach(id=>document.getElementById(id).addEventListener('input',updateDup));
+document.addEventListener('langchange',updateDup);
+updateDup();
+
+const QF={zh:{q1_y:'高表現基因覆蓋深、reads 在同一位置堆疊，會被位置-dedup 誤判為 duplicate。',q1_n:'正確答案已標示。',q2_y:'必須先 MarkDup（清掉假 evidence），才能讓 BQSR 的 covariate 模型乾淨。',q2_n:'正確答案已標示。',q3_y:'DeepVariant 內部已含 quality 重新校正，不需要 GATK BQSR。',q3_n:'正確答案已標示。'},en:{q1_y:'Highly expressed genes pile reads at the same position; position-based dedup mistakes them for duplicates.',q1_n:'Correct answer highlighted.',q2_y:'MarkDup must come first to remove fake evidence before BQSR builds its covariate model.',q2_n:'Correct answer highlighted.',q3_y:'DeepVariant has built-in quality recalibration; GATK BQSR is unnecessary.',q3_n:'Correct answer highlighted.'}};
+document.querySelectorAll('.quiz-q').forEach((q,qi)=>{const ans=+q.dataset.answer;q.querySelectorAll('.quiz-opt').forEach(o=>{o.addEventListener('click',()=>{if(q.classList.contains('answered'))return;q.classList.add('answered');const fb=document.getElementById('fb'+(qi+1));const ok=+o.dataset.idx===ans;o.classList.add(ok?'correct':'wrong');if(!ok)q.querySelectorAll('.quiz-opt')[ans].classList.add('correct');const L=I18n.get();fb.className='quiz-feedback show '+(ok?'correct-fb':'wrong-fb');fb.textContent=(ok?'✅ ':'❌ ')+(QF[L]['q'+(qi+1)+'_'+(ok?'y':'n')]||'');});});});
+</script>
+</body></html>

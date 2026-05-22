@@ -1,0 +1,321 @@
+<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Step 9: ChIP-seq & ATAC-seq — Genomics Tutorial</title>
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+</head><body>
+<nav class="top-nav"><div class="top-nav-inner">
+  <a href="index.html" class="top-nav-brand"><span>🧬</span> <span data-zh="基因體學教學" data-en="Genomics Tutorial">基因體學教學</span></a>
+  <ul class="top-nav-links"><li><a href="sequencing.html">Seq</a></li><li><a href="qc.html">QC</a></li><li><a href="alignment.html">Align</a></li><li><a href="postalign.html">PostAlign</a></li><li><a href="variant-calling.html">VarCall</a></li><li><a href="annotation.html">Annot</a></li><li><a href="sv-cnv.html">SV/CNV</a></li><li><a href="rnaseq.html">RNA-seq</a></li><li><a href="chip-atac.html" class="active">ChIP/ATAC</a></li><li><a href="methylation.html">Methyl</a></li><li><a href="gwas.html">GWAS</a></li><li><a href="popgen.html">PopGen</a></li><li><a href="enrichment.html">Enrich</a></li><li><a href="workflow.html">Pipeline</a></li>
+    <li><a href="references/index.html" data-zh="📚 參考資料" data-en="📚 References">📚 參考資料</a></li>
+  </ul>
+</div></nav>
+<div class="progress-bar-container"><div class="progress-bar" id="progressBar"></div></div>
+<header class="page-hero"><div class="step-badge">STEP 9 / 14</div>
+<h1 data-zh="ChIP-seq 與 ATAC-seq" data-en="ChIP-seq & ATAC-seq">ChIP-seq 與 ATAC-seq</h1>
+<p class="subtitle" data-lang="zh">蛋白質結合與開放染色質——peak calling 與差異 peak 分析。</p>
+<p class="subtitle" data-lang="en">Protein-DNA binding and open chromatin — peak calling and differential peak analysis.</p>
+</header>
+<main class="content-wrap">
+
+<section class="section">
+<div class="section-label" data-zh="概覽" data-en="OVERVIEW">概覽</div>
+<h2 data-zh="兩個方法在解決什麼問題？" data-en="What do these two methods solve?">兩個方法在解決什麼問題？</h2>
+<div data-lang="zh">
+<p><strong>ChIP-seq</strong>（Chromatin Immunoprecipitation Sequencing）：用抗體把某個蛋白（轉錄因子或 histone modification）抓下來，定序其結合 DNA，回答「<strong>這個蛋白在基因組哪裡結合？</strong>」</p>
+<p><strong>ATAC-seq</strong>（Assay for Transposase-Accessible Chromatin）：用 Tn5 transposase 插入「開放」（accessible）染色質區域，定序這些片段，回答「<strong>哪些染色質位置是開放（可調控）的？</strong>」相對於 DNase-seq 與 FAIRE-seq，ATAC-seq 只需 ~50,000 細胞且步驟簡單，已成事實標準。</p>
+<p>兩者的數據結構相似：BAM → <strong>peak</strong>（讀數富集的 genomic interval）→ peak 註釋 → 比較條件間 peak 差異。</p>
+</div>
+<div data-lang="en">
+<p><strong>ChIP-seq</strong>: pull down a protein (TF or histone mark) with antibody, sequence the bound DNA, answer "<strong>where in the genome is this protein bound?</strong>"</p>
+<p><strong>ATAC-seq</strong>: Tn5 transposase inserts into "accessible" chromatin, sequenced fragments mark open regions, answering "<strong>which chromatin regions are open (regulatory)?</strong>" With ~50,000 cells and simple prep, ATAC-seq has replaced DNase-seq / FAIRE-seq as the standard.</p>
+<p>Both yield similar data: BAM → <strong>peaks</strong> (read-enriched intervals) → peak annotation → differential peaks across conditions.</p>
+</div>
+<div class="callout tip"><span class="callout-icon">💡</span><div>
+<span data-lang="zh"><strong>核心原則：</strong>都需要 <strong>peak caller</strong>，而 <strong>MACS3</strong>（2024+ 取代 MACS2）是事實標準。ATAC-seq 還需 Tn5 偏移校正（<code>--shift</code> 與 <code>tn5_shift</code>）。</span>
+<span data-lang="en"><strong>Core principle:</strong> Both need a <strong>peak caller</strong>; <strong>MACS3</strong> (replacing MACS2 since 2024) is the de facto standard. ATAC-seq additionally requires Tn5 offset correction (<code>--shift</code> and <code>tn5_shift</code>).</span>
+</div></div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="技術比較" data-en="METHODS">技術比較</div>
+<h2 data-zh="一、ChIP-seq vs ATAC-seq vs CUT&Tag" data-en="I. ChIP-seq vs ATAC-seq vs CUT&Tag">一、ChIP-seq vs ATAC-seq vs CUT&Tag</h2>
+<table class="comp-table">
+<thead><tr><th data-zh="方法" data-en="Method">方法</th><th data-zh="量測對象" data-en="Measures">量測對象</th><th data-zh="細胞數" data-en="Cells">細胞數</th><th data-zh="特點" data-en="Highlight">特點</th></tr></thead>
+<tbody>
+<tr><td><strong>ChIP-seq</strong></td><td data-lang="zh">特定蛋白/組蛋白標記結合位點</td><td>10⁶–10⁷</td><td data-lang="zh">經典、需高品質抗體；input 對照必須</td><td data-lang="en">Specific protein / histone mark binding</td><td data-lang="en">Classic; high-quality antibody required; input control mandatory</td></tr>
+<tr><td><strong>ATAC-seq</strong></td><td data-lang="zh">所有開放染色質區域</td><td>~5 × 10⁴</td><td data-lang="zh">快、低 input、Tn5 偏移要校正</td><td data-lang="en">All open chromatin</td><td data-lang="en">Fast, low input; needs Tn5 offset correction</td></tr>
+<tr><td><strong>CUT&RUN</strong></td><td data-lang="zh">特定蛋白（抗體導引 MNase 切割）</td><td>10³–10⁵</td><td data-lang="zh">低背景、低 input、SEACR peak calling</td><td data-lang="en">Specific protein (antibody-tethered MNase)</td><td data-lang="en">Low background, low input, use SEACR</td></tr>
+<tr><td><strong>CUT&Tag</strong></td><td data-lang="zh">特定蛋白（抗體導引 Tn5 切割）</td><td>~10³</td><td data-lang="zh">超低 input、適合罕見細胞、scCUT&Tag</td><td data-lang="en">Specific protein (antibody-tethered Tn5)</td><td data-lang="en">Ultra-low input, single-cell capable (scCUT&Tag)</td></tr>
+</tbody></table>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="peak 類型" data-en="PEAK TYPES">peak 類型</div>
+<h2 data-zh="二、Narrow vs Broad Peaks" data-en="II. Narrow vs Broad Peaks">二、Narrow vs Broad Peaks</h2>
+<div class="card-grid cols-2">
+<div class="card"><h4>🎯 Narrow Peaks (sharp, focal)</h4>
+<div data-lang="zh"><p><strong>適用對象：</strong>轉錄因子 (TF)、H3K4me3 啟動子標記、CTCF。<strong>特徵：</strong>幾百 bp 寬、邊界清楚、訊號集中。<strong>MACS3：</strong>預設模式 <code>--call-summits</code>，pileup 模型偵測。</p></div>
+<div data-lang="en"><p><strong>Examples:</strong> transcription factors (TFs), H3K4me3 promoter mark, CTCF. <strong>Profile:</strong> few hundred bp wide, sharp boundaries, focal signal. <strong>MACS3:</strong> default mode with <code>--call-summits</code>; pileup model.</p></div>
+</div>
+<div class="card"><h4>🌊 Broad Peaks (diffuse, regional)</h4>
+<div data-lang="zh"><p><strong>適用對象：</strong>H3K27me3、H3K9me3、H3K36me3 等廣域組蛋白標記。<strong>特徵：</strong>數 kb–數百 kb 寬、邊界模糊、訊號分散。<strong>MACS3：</strong>用 <code>--broad --broad-cutoff 0.1</code>。</p></div>
+<div data-lang="en"><p><strong>Examples:</strong> H3K27me3, H3K9me3, H3K36me3 — broad histone marks. <strong>Profile:</strong> kb–hundreds of kb wide, fuzzy boundaries, diffuse signal. <strong>MACS3:</strong> use <code>--broad --broad-cutoff 0.1</code>.</p></div>
+</div>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="互動模擬" data-en="INTERACTIVE">互動模擬</div>
+<h2 data-zh="三、ATAC-seq Fragment Size 分佈" data-en="III. ATAC-seq Fragment Size Distribution">三、ATAC-seq Fragment Size 分佈</h2>
+<div data-lang="zh"><p>ATAC-seq 的 fragment size 應呈現「<strong>多峰分佈</strong>」：~50 bp 的 nucleosome-free region (NFR)、~200 bp（單 nucleosome）、~400 bp（雙）等。這是 QC 的招牌訊號——沒看到此模式，多半 prep 出問題。拖動下方滑桿生成模擬資料。</p></div>
+<div data-lang="en"><p>ATAC-seq fragment size shows a <strong>multi-modal distribution</strong>: ~50 bp (nucleosome-free region, NFR), ~200 bp (mononucleosome), ~400 bp (di-), etc. This is a hallmark QC signal — its absence usually means failed prep. Drag sliders to simulate.</p></div>
+
+<div class="interactive-panel">
+<div class="sim-stats">
+  <span class="sim-stat pass" id="nfrRatio">—</span>
+  <span class="sim-stat pass" id="monoRatio">—</span>
+  <span class="sim-stat fail" id="dinucRatio">—</span>
+</div>
+<div class="slider-group"><label><span data-zh="NFR 強度（理想 ≥ 50%）" data-en="NFR fraction (ideal ≥ 50%)">NFR 強度</span> <span id="valNFR">0.55</span></label><input type="range" id="slNFR" min="0.1" max="0.8" value="0.55" step="0.05"></div>
+<div class="slider-group"><label><span data-zh="總 fragments" data-en="Total fragments">總片段</span> <span id="valFrags">10000</span></label><input type="range" id="slFrags" min="1000" max="50000" value="10000" step="1000"></div>
+<div class="chart-container"><canvas id="atacChart"></canvas></div>
+<p style="font-size:.82rem;color:var(--c-ink-muted);text-align:center;" data-lang="zh">X: fragment size (bp) | Y: count</p>
+<p style="font-size:.82rem;color:var(--c-ink-muted);text-align:center;" data-lang="en">X: fragment size (bp) | Y: count</p>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="QC 指標" data-en="QC METRICS">QC 指標</div>
+<h2 data-zh="四、ENCODE 標準 QC 指標" data-en="IV. ENCODE Standard QC Metrics">四、ENCODE 標準 QC 指標</h2>
+<table class="comp-table">
+<thead><tr><th data-zh="指標" data-en="Metric">指標</th><th data-zh="意義" data-en="Meaning">意義</th><th data-zh="ENCODE 標準" data-en="ENCODE standard">標準</th></tr></thead>
+<tbody>
+<tr><td><strong>FRiP</strong></td><td data-lang="zh">reads-in-peaks 比例</td><td data-lang="zh">ChIP &gt; 0.05 / ATAC &gt; 0.3</td><td data-lang="en">Fraction of reads in peaks</td><td data-lang="en">ChIP &gt; 0.05 / ATAC &gt; 0.3</td></tr>
+<tr><td><strong>NSC</strong></td><td data-lang="zh">Normalized strand cross-correlation</td><td>≥ 1.05</td><td data-lang="en">Normalized strand cross-correlation</td><td>≥ 1.05</td></tr>
+<tr><td><strong>RSC</strong></td><td data-lang="zh">Relative strand cross-correlation</td><td>≥ 0.8</td><td data-lang="en">Relative strand cross-correlation</td><td>≥ 0.8</td></tr>
+<tr><td><strong>TSS enrichment</strong></td><td data-lang="zh">ATAC：TSS 中心覆蓋增強倍數</td><td>≥ 6 (高品質)</td><td data-lang="en">ATAC: enrichment at TSS centers</td><td>≥ 6 (high quality)</td></tr>
+<tr><td><strong>Mitochondrial %</strong></td><td data-lang="zh">ATAC：mtDNA reads 比例（需移除）</td><td>&lt; 20%</td><td data-lang="en">ATAC: mtDNA read fraction (filter out)</td><td>&lt; 20%</td></tr>
+</tbody></table>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="決策引導" data-en="DECISION GUIDE">決策引導</div>
+<h2 data-zh="五、peak caller / 工具選擇" data-en="V. Peak Caller / Tool Selection">五、peak caller / 工具選擇</h2>
+<div class="decision-tree">
+<h4>🌳 <span data-zh="Peak caller 決策" data-en="Peak Caller Decision">Peak caller 決策</span></h4>
+<div data-lang="zh">
+<div class="dt-node"><span class="dt-q">Q1:</span><div>TF / H3K4me3 / ATAC（narrow）？<span class="dt-arrow">→ 是 →</span> <strong>MACS3 預設模式</strong> + <code>--call-summits</code></div></div>
+<div class="dt-node"><span class="dt-q">Q2:</span><div>H3K27me3 / H3K36me3（broad）？<span class="dt-arrow">→ 是 →</span> <strong>MACS3 <code>--broad</code></strong> 或 <strong>SICER2</strong></div></div>
+<div class="dt-node"><span class="dt-q">Q3:</span><div>ATAC-seq？<span class="dt-arrow">→ 是 →</span> <strong>MACS3</strong>（<code>--format BAMPE --shift -75 --extsize 150</code> 或 <code>--nomodel</code>）+ Tn5 offset 校正</div></div>
+<div class="dt-node"><span class="dt-q">Q4:</span><div>CUT&RUN / CUT&Tag？<span class="dt-arrow">→ 是 →</span> <strong>SEACR</strong>（低背景的 sparse-signal caller）</div></div>
+<div class="dt-node"><span class="dt-q">Q5:</span><div>差異 peak 分析？<span class="dt-arrow">→ 是 →</span> <strong>DiffBind</strong>（R, 配合 DESeq2/edgeR）；ATAC 也可用 PEPATAC / atacseqQC + DiffBind</div></div>
+</div>
+<div data-lang="en">
+<div class="dt-node"><span class="dt-q">Q1:</span><div>TF / H3K4me3 / ATAC (narrow)? <span class="dt-arrow">→ Yes →</span> <strong>MACS3 default</strong> + <code>--call-summits</code></div></div>
+<div class="dt-node"><span class="dt-q">Q2:</span><div>H3K27me3 / H3K36me3 (broad)? <span class="dt-arrow">→ Yes →</span> <strong>MACS3 <code>--broad</code></strong> or <strong>SICER2</strong></div></div>
+<div class="dt-node"><span class="dt-q">Q3:</span><div>ATAC-seq? <span class="dt-arrow">→ Yes →</span> <strong>MACS3</strong> (<code>--format BAMPE --shift -75 --extsize 150</code> or <code>--nomodel</code>) + Tn5 offset</div></div>
+<div class="dt-node"><span class="dt-q">Q4:</span><div>CUT&RUN / CUT&Tag? <span class="dt-arrow">→ Yes →</span> <strong>SEACR</strong> (sparse-signal caller for low background)</div></div>
+<div class="dt-node"><span class="dt-q">Q5:</span><div>Differential peak analysis? <span class="dt-arrow">→ Yes →</span> <strong>DiffBind</strong> (R, with DESeq2/edgeR); for ATAC also PEPATAC / atacseqQC + DiffBind</div></div>
+</div>
+</div>
+
+<div class="callout warn"><span class="callout-icon">⚠️</span><div>
+<span data-lang="zh"><strong>常見坑：</strong>① ATAC-seq 沒做 mtDNA 過濾 → 30–80% reads 浪費在粒線體；② 沒用 Tn5 shift 校正 → peak summit 偏 9 bp；③ ChIP-seq 沒做 input control → peak 大量假陽性；④ 計數 peak 時用 raw counts 而非 normalized → DiffBind 結果失真。</span>
+<span data-lang="en"><strong>Common pitfalls:</strong> ① No mtDNA filter on ATAC → 30–80% reads wasted on mitochondria; ② No Tn5 shift → peak summits off by 9 bp; ③ No ChIP input control → flood of false peaks; ④ Counting peaks with raw counts instead of normalized → DiffBind results distorted.</span>
+</div></div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="程式碼" data-en="CODE">程式碼</div>
+<h2 data-zh="ChIP/ATAC 實作" data-en="ChIP/ATAC Examples">ChIP/ATAC 實作</h2>
+<div class="code-tabs">
+<div class="code-tab-btns">
+  <button class="code-tab-btn active" onclick="switchTab(this,'b1')">Bash (MACS3)</button>
+  <button class="code-tab-btn" onclick="switchTab(this,'b2')">Bash (ATAC pipeline)</button>
+  <button class="code-tab-btn" onclick="switchTab(this,'r1')">R (DiffBind)</button>
+  <button class="code-tab-btn" onclick="switchTab(this,'nf1')">Nextflow (nf-core)</button>
+</div>
+<div class="code-tab-content active" id="b1"><pre><span class="comment"># --- MACS3 (narrow, ChIP-seq TF) ---</span>
+macs3 callpeak \
+    -t IP.bam -c input.bam \
+    -f BAMPE -g hs \
+    -n MyTF \
+    --call-summits \
+    -q <span class="num">0.05</span> \
+    --outdir macs3_out/
+
+<span class="comment"># --- MACS3 broad (H3K27me3) ---</span>
+macs3 callpeak \
+    -t H3K27me3.bam -c input.bam \
+    -f BAMPE -g hs \
+    --broad --broad-cutoff <span class="num">0.1</span> \
+    -n H3K27me3 \
+    --outdir macs3_out/
+
+<span class="comment"># --- MACS3 ATAC-seq ---</span>
+macs3 callpeak \
+    -t atac.dedup.bam \
+    -f BAMPE -g hs \
+    --nomodel \
+    --shift -<span class="num">75</span> --extsize <span class="num">150</span> \
+    --call-summits \
+    -q <span class="num">0.01</span> \
+    -n S1 --outdir macs3_atac/</pre></div>
+
+<div class="code-tab-content" id="b2"><pre><span class="comment"># --- ATAC-seq 完整 QC + peak 流程 ---</span>
+<span class="comment"># 1) 比對（Bowtie2 用 -X 2000 允許長 insert）</span>
+bowtie2 -x ref/hg38 -1 R1.fq.gz -2 R2.fq.gz \
+   --very-sensitive -X <span class="num">2000</span> -p <span class="num">16</span> | \
+  samtools sort -@ <span class="num">8</span> -o atac.sorted.bam -
+samtools index atac.sorted.bam
+
+<span class="comment"># 2) 過濾 mtDNA、低 MAPQ、duplicate</span>
+samtools view -b -q <span class="num">30</span> -F <span class="num">1804</span> atac.sorted.bam \
+  $(samtools view -H atac.sorted.bam | <span class="func">grep</span> SN:chr | <span class="func">grep</span> -v chrM | <span class="func">awk</span> -F<span class="str">'\t'</span> <span class="str">'{print $2}'</span> | <span class="func">sed</span> <span class="str">'s/SN://'</span>) \
+  | samtools sort -@ <span class="num">8</span> -o atac.filt.bam -
+gatk MarkDuplicates -I atac.filt.bam -O atac.dedup.bam -M dup.txt --REMOVE_DUPLICATES <span class="kw">true</span>
+
+<span class="comment"># 3) Tn5 shift（產生 BED）</span>
+bedtools bamtobed -i atac.dedup.bam | <span class="func">awk</span> <span class="str">'BEGIN{OFS="\t"} {if($6=="+"){$2=$2+4; $3=$3+4} else {$2=$2-5; $3=$3-5}; print}'</span> &gt; atac.shifted.bed
+
+<span class="comment"># 4) Fragment size 分佈視覺化（R 套件 ATACseqQC）</span>
+<span class="comment"># 5) Peak calling: 見 b1 tab</span></pre></div>
+
+<div class="code-tab-content" id="r1"><pre><span class="comment"># --- DiffBind 差異 peak 分析 ---</span>
+<span class="func">library</span>(DiffBind)
+<span class="func">library</span>(DESeq2)
+
+samples &lt;- <span class="func">data.frame</span>(
+  SampleID  = <span class="func">c</span>(<span class="str">"C1"</span>,<span class="str">"C2"</span>,<span class="str">"T1"</span>,<span class="str">"T2"</span>),
+  Condition = <span class="func">c</span>(<span class="str">"ctrl"</span>,<span class="str">"ctrl"</span>,<span class="str">"trt"</span>,<span class="str">"trt"</span>),
+  Replicate = <span class="func">c</span>(<span class="num">1</span>,<span class="num">2</span>,<span class="num">1</span>,<span class="num">2</span>),
+  bamReads  = <span class="func">c</span>(<span class="str">"C1.bam"</span>,<span class="str">"C2.bam"</span>,<span class="str">"T1.bam"</span>,<span class="str">"T2.bam"</span>),
+  Peaks     = <span class="func">c</span>(<span class="str">"C1_peaks.narrowPeak"</span>,<span class="str">"C2_peaks.narrowPeak"</span>,
+                <span class="str">"T1_peaks.narrowPeak"</span>,<span class="str">"T2_peaks.narrowPeak"</span>),
+  PeakCaller = <span class="str">"narrow"</span>
+)
+
+db &lt;- <span class="func">dba</span>(sampleSheet = samples)
+db &lt;- <span class="func">dba.count</span>(db, summits = <span class="num">250</span>)
+db &lt;- <span class="func">dba.normalize</span>(db, method = DBA_DESEQ2)
+db &lt;- <span class="func">dba.contrast</span>(db, categories = DBA_CONDITION, reorderMeta = <span class="func">list</span>(Condition=<span class="str">"ctrl"</span>))
+db &lt;- <span class="func">dba.analyze</span>(db)
+res &lt;- <span class="func">dba.report</span>(db, contrast = <span class="num">1</span>)
+
+<span class="comment"># 註釋 peak 與最近基因 / Annotate peaks to nearest gene</span>
+<span class="func">library</span>(ChIPseeker); <span class="func">library</span>(TxDb.Hsapiens.UCSC.hg38.knownGene)
+txdb  &lt;- TxDb.Hsapiens.UCSC.hg38.knownGene
+anno  &lt;- <span class="func">annotatePeak</span>(res, TxDb=txdb, level=<span class="str">"gene"</span>)
+<span class="func">plotAnnoPie</span>(anno)</pre></div>
+
+<div class="code-tab-content" id="nf1"><pre><span class="comment">// --- nf-core/atacseq ---</span>
+nextflow run nf-core/atacseq -r 2.1.2 \
+   --input samplesheet.csv \
+   --outdir results/ \
+   --genome GRCh38 \
+   --read_length 50 \
+   -profile docker
+
+<span class="comment">// --- nf-core/chipseq ---</span>
+nextflow run nf-core/chipseq -r 2.0.0 \
+   --input samplesheet.csv \
+   --outdir results/ \
+   --genome GRCh38 \
+   --narrow_peak \
+   -profile docker
+
+<span class="comment">// samplesheet.csv for chipseq: sample,fastq_1,fastq_2,replicate,antibody,control</span>
+<span class="comment">// 包含完整 QC、MACS3、HOMER motif、differential peaks、IGV 視覺化</span></pre></div>
+</div>
+</section>
+
+<section class="quiz-section">
+<h3>📝 <span data-zh="自我檢測" data-en="Self-Check">自我檢測</span></h3>
+<div class="quiz-q" data-answer="1">
+<p data-lang="zh">1. H3K27me3 ChIP-seq 該使用哪種 peak calling 模式？</p>
+<p data-lang="en">1. Which peak calling mode for H3K27me3 ChIP-seq?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. MACS3 narrow（預設）</span><span data-lang="en">A. MACS3 narrow (default)</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. MACS3 broad（--broad）</span><span data-lang="en">B. MACS3 broad (--broad)</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. SEACR</span><span data-lang="en">C. SEACR</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. 不需要 peak calling</span><span data-lang="en">D. No peak calling needed</span></div>
+</div><div class="quiz-feedback" id="fb1"></div></div>
+
+<div class="quiz-q" data-answer="2">
+<p data-lang="zh">2. ATAC-seq 沒有 fragment size 多峰分佈代表什麼？</p>
+<p data-lang="en">2. Lack of multi-modal fragment-size distribution in ATAC-seq suggests?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. 樣本品質特別好</span><span data-lang="en">A. Sample is unusually high quality</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. 細胞數不足</span><span data-lang="en">B. Cell count too low</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. Tn5 反應或核小體結構出問題（prep 失敗訊號）</span><span data-lang="en">C. Tn5 reaction or nucleosome structure failed (prep failure signal)</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. 沒有意義</span><span data-lang="en">D. Not meaningful</span></div>
+</div><div class="quiz-feedback" id="fb2"></div></div>
+
+<div class="quiz-q" data-answer="1">
+<p data-lang="zh">3. 為什麼 ChIP-seq 需要 input control？</p>
+<p data-lang="en">3. Why does ChIP-seq need an input control?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. 比較 sequencing 深度</span><span data-lang="en">A. To compare sequencing depth</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. 校正染色質可及性 / 比對偏誤造成的背景訊號</span><span data-lang="en">B. To control for chromatin accessibility / mapping bias background</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. 校正 Tn5 偏移</span><span data-lang="en">C. To correct Tn5 offset</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. 計算 FRiP</span><span data-lang="en">D. To compute FRiP</span></div>
+</div><div class="quiz-feedback" id="fb3"></div></div>
+</section>
+
+<nav class="page-nav">
+<a href="rnaseq.html"><span class="nav-dir" data-zh="← 上一步" data-en="← Previous">← 上一步</span><span class="nav-title" data-zh="Step 8: Bulk RNA-seq 差異表達分析" data-en="Step 8: Bulk RNA-seq Differential Expression">Step 8: Bulk RNA-seq 差異表達分析</span></a>
+<a href="methylation.html"><span class="nav-dir" data-zh="下一步 →" data-en="Next →">下一步 →</span><span class="nav-title" data-zh="Step 10: DNA 甲基化與表觀基因體" data-en="Step 10: DNA Methylation &amp; Epigenomics">Step 10: DNA 甲基化與表觀基因體</span></a>
+</nav>
+</main>
+<footer class="site-footer">© Charlene — Genomics Interactive Tutorial</footer>
+<script src="i18n.js"></script>
+<script>
+window.addEventListener('scroll',()=>{const h=document.documentElement;document.getElementById('progressBar').style.width=(h.scrollTop/(h.scrollHeight-h.clientHeight))*100+'%';});
+function switchTab(b,id){const p=b.closest('.code-tabs');p.querySelectorAll('.code-tab-btn').forEach(x=>x.classList.remove('active'));p.querySelectorAll('.code-tab-content').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.getElementById(id).classList.add('active');}
+
+function randn(){let u=0,v=0;while(u===0)u=Math.random();while(v===0)v=Math.random();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+// gaussian-like multi-modal ATAC fragment dist
+const atacChart=new Chart(document.getElementById('atacChart'),{type:'line',data:{labels:[],datasets:[{label:'Fragment count',data:[],borderColor:'#1a6b5a',backgroundColor:'rgba(26,107,90,.2)',fill:true,tension:.3,pointRadius:0}]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{title:{display:true,text:'Fragment size (bp)'}},y:{title:{display:true,text:'Count'},beginAtZero:true}},plugins:{legend:{display:false}}}});
+
+function updateATAC(){
+  const nfr=+document.getElementById('slNFR').value;
+  const total=+document.getElementById('slFrags').value;
+  document.getElementById('valNFR').textContent=nfr.toFixed(2);
+  document.getElementById('valFrags').textContent=total;
+  const xs=[], ys=[];
+  let nfrCount=0, monoCount=0, dinucCount=0, otherCount=0;
+  // Distribution model:
+  // NFR: peak at 50, sigma 30
+  // Mono-nucleosome: peak at 200, sigma 30
+  // Di-nucleosome: peak at 400, sigma 40
+  // Tri-nucleosome: peak at 600, sigma 50
+  function gauss(x,mu,sigma){return Math.exp(-Math.pow(x-mu,2)/(2*sigma*sigma))/(sigma*Math.sqrt(2*Math.PI));}
+  for(let x=0;x<=800;x+=10){
+    const g1=gauss(x,50,30)*nfr;
+    const g2=gauss(x,200,40)*(1-nfr)*0.5;
+    const g3=gauss(x,400,50)*(1-nfr)*0.25;
+    const g4=gauss(x,600,60)*(1-nfr)*0.15;
+    const count = Math.round((g1+g2+g3+g4)*total*10);
+    xs.push(x); ys.push(count);
+    if(x<100) nfrCount+=count;
+    else if(x<250) monoCount+=count;
+    else if(x<450) dinucCount+=count;
+    else otherCount+=count;
+  }
+  const totalC = nfrCount+monoCount+dinucCount+otherCount;
+  atacChart.data.labels=xs;
+  atacChart.data.datasets[0].data=ys;
+  atacChart.update('none');
+  const L=I18n.get();
+  document.getElementById('nfrRatio').textContent='NFR: '+(100*nfrCount/totalC).toFixed(1)+'%';
+  document.getElementById('monoRatio').textContent=(L==='zh'?'單核小體: ':'Mono-nuc: ')+(100*monoCount/totalC).toFixed(1)+'%';
+  document.getElementById('dinucRatio').textContent=(L==='zh'?'雙核小體: ':'Di-nuc: ')+(100*dinucCount/totalC).toFixed(1)+'%';
+}
+['slNFR','slFrags'].forEach(id=>document.getElementById(id).addEventListener('input',updateATAC));
+document.addEventListener('langchange',updateATAC);
+updateATAC();
+
+const QF={zh:{q1_y:'H3K27me3 是廣域標記，需用 --broad 模式才能捕捉橫跨數十 kb 的訊號。',q1_n:'正確答案已標示。',q2_y:'NFR + 核小體階梯峰是 ATAC-seq 成功的招牌；缺失通常意味 prep 失敗。',q2_n:'正確答案已標示。',q3_y:'input control 提供「沒有特異性結合」的背景，校正 mapping bias 與染色質可及性。',q3_n:'正確答案已標示。'},en:{q1_y:'H3K27me3 is a broad mark; --broad mode is needed to capture tens-of-kb domains.',q1_n:'Correct answer highlighted.',q2_y:'NFR + nucleosome ladder is the hallmark of a successful ATAC prep; absence signals failure.',q2_n:'Correct answer highlighted.',q3_y:'Input controls provide the "no specific binding" baseline that corrects mapping bias and accessibility.',q3_n:'Correct answer highlighted.'}};
+document.querySelectorAll('.quiz-q').forEach((q,qi)=>{const ans=+q.dataset.answer;q.querySelectorAll('.quiz-opt').forEach(o=>{o.addEventListener('click',()=>{if(q.classList.contains('answered'))return;q.classList.add('answered');const fb=document.getElementById('fb'+(qi+1));const ok=+o.dataset.idx===ans;o.classList.add(ok?'correct':'wrong');if(!ok)q.querySelectorAll('.quiz-opt')[ans].classList.add('correct');const L=I18n.get();fb.className='quiz-feedback show '+(ok?'correct-fb':'wrong-fb');fb.textContent=(ok?'✅ ':'❌ ')+(QF[L]['q'+(qi+1)+'_'+(ok?'y':'n')]||'');});});});
+</script>
+</body></html>

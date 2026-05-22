@@ -1,0 +1,321 @@
+<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Step 12: Population Genetics — Genomics Tutorial</title>
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+</head><body>
+<nav class="top-nav"><div class="top-nav-inner">
+  <a href="index.html" class="top-nav-brand"><span>🧬</span> <span data-zh="基因體學教學" data-en="Genomics Tutorial">基因體學教學</span></a>
+  <ul class="top-nav-links"><li><a href="sequencing.html">Seq</a></li><li><a href="qc.html">QC</a></li><li><a href="alignment.html">Align</a></li><li><a href="postalign.html">PostAlign</a></li><li><a href="variant-calling.html">VarCall</a></li><li><a href="annotation.html">Annot</a></li><li><a href="sv-cnv.html">SV/CNV</a></li><li><a href="rnaseq.html">RNA-seq</a></li><li><a href="chip-atac.html">ChIP/ATAC</a></li><li><a href="methylation.html">Methyl</a></li><li><a href="gwas.html">GWAS</a></li><li><a href="popgen.html" class="active">PopGen</a></li><li><a href="enrichment.html">Enrich</a></li><li><a href="workflow.html">Pipeline</a></li>
+    <li><a href="references/index.html" data-zh="📚 參考資料" data-en="📚 References">📚 參考資料</a></li>
+  </ul>
+</div></nav>
+<div class="progress-bar-container"><div class="progress-bar" id="progressBar"></div></div>
+<header class="page-hero"><div class="step-badge">STEP 12 / 14</div>
+<h1 data-zh="群體遺傳學" data-en="Population Genetics">群體遺傳學</h1>
+<p class="subtitle" data-lang="zh">在群體尺度理解基因頻率、結構、選擇與演化歷史。</p>
+<p class="subtitle" data-lang="en">Allele frequencies, structure, selection, and demographic history at the population scale.</p>
+</header>
+<main class="content-wrap">
+
+<section class="section">
+<div class="section-label" data-zh="概覽" data-en="OVERVIEW">概覽</div>
+<h2 data-zh="群體遺傳學在問什麼？" data-en="What does population genetics ask?">群體遺傳學在問什麼？</h2>
+<div data-lang="zh">
+<p>群體遺傳學的核心問題：<strong>「為什麼這個族群的基因頻率是這個樣子？」</strong>——背後是四個力量：<strong>突變、漂變、遷移、選擇</strong>。從族群 VCF 出發，我們可以：</p>
+<ul style="margin:8px 0 0 20px;color:var(--c-ink-light);">
+<li>用 <strong>PCA / ADMIXTURE</strong> 描述族群結構（誰跟誰近、有沒有 admixture）</li>
+<li>用 <strong>Fst</strong> 量化族群間分化</li>
+<li>用 <strong>Tajima's D、π、θ_W</strong> 估計變異與選擇</li>
+<li>用 <strong>iHS、XP-EHH、PBS</strong> 偵測自然選擇</li>
+<li>用 <strong>PSMC、SMC++、SLiM</strong> 推斷有效族群大小（Ne）與分裂歷史</li>
+</ul>
+<p>這些方法既是基礎科學，也是 GWAS / 醫學基因體學的<strong>必要前置（控制族群結構）</strong>。</p>
+</div>
+<div data-lang="en">
+<p>The central question of population genetics: <strong>"Why are allele frequencies in this population the way they are?"</strong> — driven by four forces: <strong>mutation, drift, migration, selection</strong>. From a cohort VCF you can:</p>
+<ul style="margin:8px 0 0 20px;color:var(--c-ink-light);">
+<li>Use <strong>PCA / ADMIXTURE</strong> to describe population structure (who is close to whom, any admixture?)</li>
+<li>Use <strong>Fst</strong> to quantify between-population differentiation</li>
+<li>Use <strong>Tajima's D, π, θ_W</strong> for diversity and selection signatures</li>
+<li>Use <strong>iHS, XP-EHH, PBS</strong> for selection scans</li>
+<li>Use <strong>PSMC, SMC++, SLiM</strong> to infer effective population size (Ne) and split history</li>
+</ul>
+<p>These methods are both basic science and a <strong>necessary precondition for GWAS / medical genomics</strong> (controlling for population structure).</p>
+</div>
+<div class="callout tip"><span class="callout-icon">💡</span><div>
+<span data-lang="zh"><strong>核心原則：</strong>分析前一定要做 PCA。歐裔 + 東亞裔 + 非裔 pool 在一起跑 GWAS，PC1 會解釋 80% 變異而不是疾病訊號——這叫 <strong>population stratification</strong>。</span>
+<span data-lang="en"><strong>Core principle:</strong> Always run PCA first. Pooling European + East Asian + African samples in a single GWAS makes PC1 explain 80% of variance via ancestry instead of phenotype — that's <strong>population stratification</strong>.</span>
+</div></div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="核心指標" data-en="CORE METRICS">核心指標</div>
+<h2 data-zh="一、必懂的群體遺傳量" data-en="I. Essential Population-Genetic Statistics">一、必懂的群體遺傳量</h2>
+<div class="card-grid cols-2">
+<div class="card"><h4>π — 核苷酸多樣性</h4>
+<div data-lang="zh"><p>任兩條序列在某位點的平均差異機率。<strong>意義：</strong>族群內遺傳多樣性。<strong>典型：</strong>人類 ≈ 0.001（每 1 kb 約 1 個差異）；果蠅 ≈ 0.01；某些自交植物 ≈ 0.0001。低 π 可能代表 bottleneck 或近交。</p></div>
+<div data-lang="en"><p>Average probability of two sequences differing at a site. <strong>Meaning:</strong> within-population diversity. <strong>Typical:</strong> humans ≈ 0.001 (~1 diff per kb); fruit fly ≈ 0.01; selfing plants ≈ 0.0001. Low π may indicate bottlenecks or inbreeding.</p></div>
+</div>
+<div class="card"><h4>Tajima's D</h4>
+<div data-lang="zh"><p>比較 π 與 Watterson's θ_W（基於 SNP 數）。<strong>意義：</strong>D ≈ 0 中性；<strong>D &lt; 0</strong> 暗示族群擴張或 positive selection（過多 rare alleles）；<strong>D &gt; 0</strong> 暗示 balancing selection 或 bottleneck（中等頻率 allele 過多）。</p></div>
+<div data-lang="en"><p>Compares π with Watterson's θ_W (SNP-count-based). <strong>D ≈ 0:</strong> neutral; <strong>D &lt; 0:</strong> population expansion or positive selection (excess of rare alleles); <strong>D &gt; 0:</strong> balancing selection or bottleneck (excess of intermediate-frequency alleles).</p></div>
+</div>
+<div class="card"><h4>Fst — 族群分化</h4>
+<div data-lang="zh"><p>量化兩族群間的等位基因頻率差異。<strong>0 = 完全相同、1 = 完全不同。</strong>人類洲際 Fst ≈ 0.05–0.15；歐洲內部 ≈ 0.005–0.01；雙胞胎物種間 0.5+。Weir & Cockerham 1984 是經典 estimator。</p></div>
+<div data-lang="en"><p>Quantifies allele-frequency differentiation between populations. <strong>0 = identical, 1 = completely separated.</strong> Human continental Fst ≈ 0.05–0.15; within-Europe ≈ 0.005–0.01; sister species 0.5+. Weir & Cockerham 1984 is the classical estimator.</p></div>
+</div>
+<div class="card"><h4>iHS / XP-EHH — 選擇訊號</h4>
+<div data-lang="zh"><p>偵測近期 positive selection。<strong>iHS</strong>（族群內）：核心 allele 周圍 haplotype 長度比較；最近的 selective sweep 會留下長 high-frequency haplotype。<strong>XP-EHH</strong>（跨族群）：比較同一位點在兩族群的 haplotype 長度；單一族群選擇會留下不對稱訊號。</p></div>
+<div data-lang="en"><p>Detect recent positive selection. <strong>iHS</strong> (within-population): compares haplotype length around a core allele; recent selective sweeps leave long high-frequency haplotypes. <strong>XP-EHH</strong> (cross-population): compares haplotype lengths between two populations; single-population selection leaves an asymmetric signal.</p></div>
+</div>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="互動模擬" data-en="INTERACTIVE">互動模擬</div>
+<h2 data-zh="二、PCA + ADMIXTURE 視覺化" data-en="II. PCA + ADMIXTURE Visualization">二、PCA + ADMIXTURE 視覺化</h2>
+<div data-lang="zh"><p>調整 admixture 比例觀察 PCA 點如何在三個祖先族群間移動。每個個體模擬為「歐裔/亞裔/非裔」三種祖先成分混合。</p></div>
+<div data-lang="en"><p>Adjust admixture proportions to see how PCA points move across three ancestral populations. Each individual is simulated as a mix of three ancestries (European/Asian/African).</p></div>
+
+<div class="interactive-panel">
+<div class="sim-stats">
+  <span class="sim-stat pass" id="popN">—</span>
+</div>
+<div class="slider-group"><label><span data-zh="Admixture 比例（隨機混合強度）" data-en="Admixture rate (random mixing)">混合強度</span> <span id="valAdm">0.2</span></label><input type="range" id="slAdm" min="0" max="1" value="0.2" step="0.05"></div>
+<div class="slider-group"><label><span data-zh="個體總數" data-en="Total individuals">個體數</span> <span id="valIndiv">200</span></label><input type="range" id="slIndiv" min="50" max="500" value="200" step="10"></div>
+<div class="chart-container" style="height:400px"><canvas id="pcaChart"></canvas></div>
+<p style="font-size:.82rem;color:var(--c-ink-muted);text-align:center;" data-lang="zh">X: PC1（最大族群分化軸）| Y: PC2</p>
+<p style="font-size:.82rem;color:var(--c-ink-muted);text-align:center;" data-lang="en">X: PC1 (largest ancestry axis) | Y: PC2</p>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="工具" data-en="TOOLS">工具</div>
+<h2 data-zh="三、群體遺傳工具一覽" data-en="III. Population Genetics Tool Landscape">三、群體遺傳工具一覽</h2>
+<table class="comp-table">
+<thead><tr><th>Tool</th><th data-zh="功能" data-en="Function">功能</th><th data-zh="特色" data-en="Highlight">特色</th></tr></thead>
+<tbody>
+<tr><td><strong>PLINK 2.0</strong></td><td data-lang="zh">PCA、HWE、Fst、IBD/ROH</td><td data-lang="zh">最快的 PCA（百萬樣本 OK）</td><td data-lang="en">PCA, HWE, Fst, IBD/ROH</td><td data-lang="en">Fastest PCA (scales to millions)</td></tr>
+<tr><td><strong>ADMIXTURE</strong></td><td data-lang="zh">最大似然估計祖先成分 K</td><td data-lang="zh">速度比 STRUCTURE 快百倍</td><td data-lang="en">ML estimation of K ancestry components</td><td data-lang="en">100× faster than STRUCTURE</td></tr>
+<tr><td><strong>scikit-allel</strong></td><td data-lang="zh">Python 群體遺傳工具箱</td><td data-lang="zh">π、Tajima D、Fst、iHS、XP-EHH</td><td data-lang="en">Python pop-gen toolkit</td><td data-lang="en">π, Tajima D, Fst, iHS, XP-EHH</td></tr>
+<tr><td><strong>SNPRelate / GENESIS</strong></td><td data-lang="zh">R 中的群體分析</td><td data-lang="zh">PCA、IBD、kinship、cohort-scale</td><td data-lang="en">Pop-gen in R</td><td data-lang="en">PCA, IBD, kinship, cohort-scale</td></tr>
+<tr><td><strong>PSMC / SMC++</strong></td><td data-lang="zh">推斷有效族群大小歷史</td><td data-lang="zh">PSMC 單個 diploid；SMC++ 多樣本</td><td data-lang="en">Infer effective population size history</td><td data-lang="en">PSMC: single diploid; SMC++: multi-sample</td></tr>
+<tr><td><strong>SLiM 4</strong></td><td data-lang="zh">前向模擬群體演化</td><td data-lang="zh">學術教學與假說檢驗</td><td data-lang="en">Forward population simulation</td><td data-lang="en">Teaching and hypothesis testing</td></tr>
+<tr><td><strong>msprime / tskit</strong></td><td data-lang="zh">高效 coalescent 模擬</td><td data-lang="zh">產生 ground-truth 來 benchmark 方法</td><td data-lang="en">Fast coalescent simulation</td><td data-lang="en">Generate ground truth for benchmarking</td></tr>
+</tbody></table>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="決策引導" data-en="DECISION GUIDE">決策引導</div>
+<h2 data-zh="四、典型分析流程" data-en="IV. Typical Analysis Workflow">四、典型分析流程</h2>
+<div class="decision-tree">
+<h4>🌳 <span data-zh="從 VCF 到群體洞見" data-en="From VCF to Population Insights">從 VCF 到群體洞見</span></h4>
+<div data-lang="zh">
+<div class="dt-node"><span class="dt-q">1.</span><div><strong>QC</strong>：MAF ≥ 0.05、missingness、HWE、移除親屬（KING）</div></div>
+<div class="dt-node"><span class="dt-q">2.</span><div><strong>LD 修剪</strong>：PLINK <code>--indep-pairwise 50 5 0.2</code> 取得 ~100K independent SNPs</div></div>
+<div class="dt-node"><span class="dt-q">3.</span><div><strong>PCA</strong>：plink2 <code>--pca 10</code> → 散佈圖 (PC1 vs PC2)；尋找 outlier 與群集</div></div>
+<div class="dt-node"><span class="dt-q">4.</span><div><strong>ADMIXTURE</strong>：跑 K = 2…10，用 CV error 找最佳 K，繪 stacked bar plot</div></div>
+<div class="dt-node"><span class="dt-q">5.</span><div><strong>分化</strong>：scikit-allel 計算 pairwise Fst；找 Fst 異常高的位點（可能選擇）</div></div>
+<div class="dt-node"><span class="dt-q">6.</span><div><strong>選擇掃描</strong>：iHS（族群內）、XP-EHH（跨族群）、PBS（三族群）</div></div>
+<div class="dt-node"><span class="dt-q">7.</span><div><strong>歷史</strong>：SMC++ 或 IBDNe 推估 Ne(t) 曲線</div></div>
+</div>
+<div data-lang="en">
+<div class="dt-node"><span class="dt-q">1.</span><div><strong>QC</strong>: MAF ≥ 0.05, missingness, HWE, remove relatives (KING)</div></div>
+<div class="dt-node"><span class="dt-q">2.</span><div><strong>LD pruning</strong>: PLINK <code>--indep-pairwise 50 5 0.2</code> → ~100K independent SNPs</div></div>
+<div class="dt-node"><span class="dt-q">3.</span><div><strong>PCA</strong>: plink2 <code>--pca 10</code> → scatter (PC1 vs PC2); identify outliers and clusters</div></div>
+<div class="dt-node"><span class="dt-q">4.</span><div><strong>ADMIXTURE</strong>: run K = 2…10, use CV error to pick best K; plot stacked bar</div></div>
+<div class="dt-node"><span class="dt-q">5.</span><div><strong>Differentiation</strong>: scikit-allel for pairwise Fst; flag outlier sites (possible selection)</div></div>
+<div class="dt-node"><span class="dt-q">6.</span><div><strong>Selection scans</strong>: iHS (within-pop), XP-EHH (cross-pop), PBS (three-pop)</div></div>
+<div class="dt-node"><span class="dt-q">7.</span><div><strong>Demographic history</strong>: SMC++ or IBDNe to infer Ne(t) trajectory</div></div>
+</div>
+</div>
+</section>
+
+<section class="section">
+<div class="section-label" data-zh="程式碼" data-en="CODE">程式碼</div>
+<h2 data-zh="實作範例" data-en="Code Examples">實作範例</h2>
+<div class="code-tabs">
+<div class="code-tab-btns">
+  <button class="code-tab-btn active" onclick="switchTab(this,'b1')">Bash (PLINK + ADMIXTURE)</button>
+  <button class="code-tab-btn" onclick="switchTab(this,'p1')">Python (scikit-allel)</button>
+  <button class="code-tab-btn" onclick="switchTab(this,'r1')">R (SNPRelate)</button>
+</div>
+<div class="code-tab-content active" id="b1"><pre><span class="comment"># --- PCA with PLINK 2.0 ---</span>
+plink2 --vcf cohort.vcf.gz \
+   --maf <span class="num">0.05</span> --geno <span class="num">0.05</span> --hwe <span class="num">1e-6</span> \
+   --indep-pairwise <span class="num">50</span> <span class="num">5</span> <span class="num">0.2</span> --out prune
+plink2 --vcf cohort.vcf.gz --extract prune.prune.in --make-bed --out cohort.pruned
+
+plink2 --bfile cohort.pruned --pca <span class="num">10</span> --out pca
+<span class="comment"># pca.eigenvec: FID IID PC1 PC2 ... PC10</span>
+
+<span class="comment"># --- ADMIXTURE for K=2..6 with cross-validation ---</span>
+<span class="kw">for</span> K <span class="kw">in</span> <span class="num">2</span> <span class="num">3</span> <span class="num">4</span> <span class="num">5</span> <span class="num">6</span>; <span class="kw">do</span>
+   admixture --cv cohort.pruned.bed $K | <span class="func">tee</span> log${K}.txt
+<span class="kw">done</span>
+<span class="func">grep</span> -h CV log*.txt
+<span class="comment"># 選 CV error 最低的 K</span>
+
+<span class="comment"># --- pairwise Fst ---</span>
+plink2 --bfile cohort.pruned \
+   --pheno populations.tsv --pheno-name POP \
+   --fst POP --out fst_results</pre></div>
+
+<div class="code-tab-content" id="p1"><pre><span class="comment"># scikit-allel 完整群體遺傳分析</span>
+<span class="kw">import</span> allel, numpy <span class="kw">as</span> np
+
+callset = allel.read_vcf(<span class="str">"cohort.vcf.gz"</span>)
+gt = allel.GenotypeArray(callset[<span class="str">"calldata/GT"</span>])
+samples = callset[<span class="str">"samples"</span>]
+pop = <span class="func">np.array</span>([<span class="str">"EUR"</span>,<span class="str">"EAS"</span>,<span class="str">"AFR"</span>][i%<span class="num">3</span>] <span class="kw">for</span> i <span class="kw">in</span> <span class="func">range</span>(<span class="func">len</span>(samples)))
+
+<span class="comment"># π (nucleotide diversity) per population</span>
+<span class="kw">for</span> p <span class="kw">in</span> [<span class="str">"EUR"</span>,<span class="str">"EAS"</span>,<span class="str">"AFR"</span>]:
+    idx = np.where(pop == p)[<span class="num">0</span>]
+    sub = gt.take(idx, axis=<span class="num">1</span>)
+    ac  = sub.count_alleles()
+    pi  = allel.sequence_diversity(callset[<span class="str">"variants/POS"</span>], ac)
+    <span class="func">print</span>(p, <span class="str">"π ="</span>, pi)
+
+<span class="comment"># Tajima's D in windows</span>
+ac = gt.count_alleles()
+td = allel.windowed_tajima_d(
+        callset[<span class="str">"variants/POS"</span>], ac, size=<span class="num">100_000</span>)
+<span class="func">print</span>(<span class="str">"Tajima D windows:"</span>, td[<span class="num">0</span>].mean())
+
+<span class="comment"># Pairwise Fst (EUR vs AFR)</span>
+eur_idx = np.where(pop == <span class="str">"EUR"</span>)[<span class="num">0</span>]
+afr_idx = np.where(pop == <span class="str">"AFR"</span>)[<span class="num">0</span>]
+ac_eur = gt.take(eur_idx, axis=<span class="num">1</span>).count_alleles()
+ac_afr = gt.take(afr_idx, axis=<span class="num">1</span>).count_alleles()
+num, den = allel.hudson_fst(ac_eur, ac_afr)
+fst = np.sum(num) / np.sum(den)
+<span class="func">print</span>(<span class="str">"Hudson Fst (EUR vs AFR) ="</span>, fst)
+
+<span class="comment"># PCA</span>
+gn = gt.to_n_alt()
+coords, model = allel.pca(gn, n_components=<span class="num">10</span>, scaler=<span class="str">"patterson"</span>)
+<span class="func">print</span>(<span class="str">"Variance explained:"</span>, model.explained_variance_ratio_[:<span class="num">3</span>])</pre></div>
+
+<div class="code-tab-content" id="r1"><pre><span class="comment"># --- R: SNPRelate ---</span>
+<span class="func">library</span>(SNPRelate)
+
+<span class="comment"># 把 VCF 轉成 GDS</span>
+<span class="func">snpgdsVCF2GDS</span>(<span class="str">"cohort.vcf.gz"</span>, <span class="str">"cohort.gds"</span>, method=<span class="str">"biallelic.only"</span>)
+gds &lt;- <span class="func">snpgdsOpen</span>(<span class="str">"cohort.gds"</span>)
+
+<span class="comment"># LD prune</span>
+snpset &lt;- <span class="func">snpgdsLDpruning</span>(gds, ld.threshold=<span class="num">0.2</span>, slide.max.bp=<span class="num">50000</span>)
+prune_snps &lt;- <span class="func">unlist</span>(snpset)
+
+<span class="comment"># PCA</span>
+pca &lt;- <span class="func">snpgdsPCA</span>(gds, snp.id=prune_snps, num.thread=<span class="num">8</span>)
+df  &lt;- <span class="func">data.frame</span>(sample=pca$sample.id, PC1=pca$eigenvect[,<span class="num">1</span>],
+                  PC2=pca$eigenvect[,<span class="num">2</span>], pop=pheno$pop)
+<span class="func">library</span>(ggplot2)
+<span class="func">ggplot</span>(df, <span class="func">aes</span>(PC1, PC2, color=pop)) + <span class="func">geom_point</span>(alpha=<span class="num">0.7</span>)
+
+<span class="comment"># IBD / kinship</span>
+ibd &lt;- <span class="func">snpgdsIBDKING</span>(gds, snp.id=prune_snps, num.thread=<span class="num">8</span>)
+kin &lt;- <span class="func">snpgdsIBDSelection</span>(ibd, kinship.cutoff=<span class="num">0.0884</span>)
+<span class="func">head</span>(kin)
+
+<span class="comment"># 計算 Fst</span>
+fst &lt;- <span class="func">snpgdsFst</span>(gds, population=<span class="kw">as.factor</span>(pheno$pop), method=<span class="str">"W&amp;C84"</span>)
+<span class="func">cat</span>(<span class="str">"Overall Fst:"</span>, fst$Fst, <span class="str">"\n"</span>)</pre></div>
+</div>
+</section>
+
+<section class="quiz-section">
+<h3>📝 <span data-zh="自我檢測" data-en="Self-Check">自我檢測</span></h3>
+<div class="quiz-q" data-answer="1">
+<p data-lang="zh">1. Tajima's D 顯著為負值通常代表？</p>
+<p data-lang="en">1. A significantly negative Tajima's D usually indicates?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. Balancing selection</span><span data-lang="en">A. Balancing selection</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. 族群擴張或 positive selection（過多 rare alleles）</span><span data-lang="en">B. Population expansion or positive selection (excess rare alleles)</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. Bottleneck</span><span data-lang="en">C. Bottleneck</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. 完全中性</span><span data-lang="en">D. Strict neutrality</span></div>
+</div><div class="quiz-feedback" id="fb1"></div></div>
+
+<div class="quiz-q" data-answer="0">
+<p data-lang="zh">2. 跑 PCA 之前要先 LD prune 的主要原因？</p>
+<p data-lang="en">2. Why LD-prune before PCA?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. LD 區段內高度相關的 SNP 會放大局部訊號，扭曲 PC</span><span data-lang="en">A. Highly correlated SNPs within LD blocks amplify local signals and distort PCs</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. PCA 不能處理超過 1M SNP</span><span data-lang="en">B. PCA cannot handle &gt;1M SNPs</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. LD-pruned SNPs 較準確</span><span data-lang="en">C. LD-pruned SNPs are more accurate</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. 為了壓縮檔案</span><span data-lang="en">D. For file compression</span></div>
+</div><div class="quiz-feedback" id="fb2"></div></div>
+
+<div class="quiz-q" data-answer="2">
+<p data-lang="zh">3. ADMIXTURE 的 K 值如何選擇？</p>
+<p data-lang="en">3. How to choose K in ADMIXTURE?</p>
+<div class="quiz-options">
+<div class="quiz-opt" data-idx="0"><span data-lang="zh">A. K 越大越好</span><span data-lang="en">A. Larger K is always better</span></div>
+<div class="quiz-opt" data-idx="1"><span data-lang="zh">B. K 必須等於樣本族群數</span><span data-lang="en">B. K must equal the number of populations</span></div>
+<div class="quiz-opt" data-idx="2"><span data-lang="zh">C. 跑多個 K 取 cross-validation (CV) error 最低的</span><span data-lang="en">C. Run multiple K and choose the lowest cross-validation (CV) error</span></div>
+<div class="quiz-opt" data-idx="3"><span data-lang="zh">D. K = 2 永遠最好</span><span data-lang="en">D. K = 2 is always best</span></div>
+</div><div class="quiz-feedback" id="fb3"></div></div>
+</section>
+
+<nav class="page-nav">
+<a href="gwas.html"><span class="nav-dir" data-zh="← 上一步" data-en="← Previous">← 上一步</span><span class="nav-title" data-zh="Step 11: GWAS 全基因組關聯分析" data-en="Step 11: GWAS — Genome-Wide Association Study">Step 11: GWAS 全基因組關聯分析</span></a>
+<a href="enrichment.html"><span class="nav-dir" data-zh="下一步 →" data-en="Next →">下一步 →</span><span class="nav-title" data-zh="Step 13: 功能富集分析" data-en="Step 13: Functional Enrichment">Step 13: 功能富集分析</span></a>
+</nav>
+</main>
+<footer class="site-footer">© Charlene — Genomics Interactive Tutorial</footer>
+<script src="i18n.js"></script>
+<script>
+window.addEventListener('scroll',()=>{const h=document.documentElement;document.getElementById('progressBar').style.width=(h.scrollTop/(h.scrollHeight-h.clientHeight))*100+'%';});
+function switchTab(b,id){const p=b.closest('.code-tabs');p.querySelectorAll('.code-tab-btn').forEach(x=>x.classList.remove('active'));p.querySelectorAll('.code-tab-content').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.getElementById(id).classList.add('active');}
+
+// PCA simulation: three ancestral clusters with admixture
+function randn(){let u=0,v=0;while(u===0)u=Math.random();while(v===0)v=Math.random();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+const ancestors=[
+  {name:'EUR', x:-2.5, y:1.0, color:'rgba(59,130,246,.7)'},
+  {name:'EAS', x:2.5,  y:1.0, color:'rgba(212,160,60,.8)'},
+  {name:'AFR', x:0,    y:-2.2, color:'rgba(192,57,43,.7)'}
+];
+
+const pcaChart=new Chart(document.getElementById('pcaChart'),{type:'scatter',data:{datasets:[
+  {label:'EUR',data:[],backgroundColor:ancestors[0].color},
+  {label:'EAS',data:[],backgroundColor:ancestors[1].color},
+  {label:'AFR',data:[],backgroundColor:ancestors[2].color},
+  {label:'Admixed',data:[],backgroundColor:'rgba(100,100,100,.6)'}
+]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{title:{display:true,text:'PC1'},min:-4.5,max:4.5},y:{title:{display:true,text:'PC2'},min:-4.5,max:4.5}},plugins:{legend:{position:'top'}}}});
+
+function updatePCA(){
+  const admRate=+document.getElementById('slAdm').value;
+  const N=+document.getElementById('slIndiv').value;
+  document.getElementById('valAdm').textContent=admRate.toFixed(2);
+  document.getElementById('valIndiv').textContent=N;
+  const groups=[[],[],[],[]];
+  for(let i=0;i<N;i++){
+    const isAdmix = Math.random() < admRate;
+    if(isAdmix){
+      // mix of all three with random weights
+      let w=[Math.random(),Math.random(),Math.random()];
+      const s=w[0]+w[1]+w[2]; w=w.map(x=>x/s);
+      const x=ancestors[0].x*w[0]+ancestors[1].x*w[1]+ancestors[2].x*w[2]+randn()*0.15;
+      const y=ancestors[0].y*w[0]+ancestors[1].y*w[1]+ancestors[2].y*w[2]+randn()*0.15;
+      groups[3].push({x,y});
+    } else {
+      const k=Math.floor(Math.random()*3);
+      groups[k].push({x:ancestors[k].x+randn()*0.4, y:ancestors[k].y+randn()*0.4});
+    }
+  }
+  pcaChart.data.datasets.forEach((ds,i)=>ds.data=groups[i]);
+  pcaChart.update('none');
+  const L=I18n.get();
+  document.getElementById('popN').textContent=(L==='zh'?'EUR/EAS/AFR/混合: ':'EUR/EAS/AFR/Admix: ')+
+    groups[0].length+' / '+groups[1].length+' / '+groups[2].length+' / '+groups[3].length;
+}
+['slAdm','slIndiv'].forEach(id=>document.getElementById(id).addEventListener('input',updatePCA));
+document.addEventListener('langchange',updatePCA);
+updatePCA();
+
+const QF={zh:{q1_y:'D<0 暗示過多 rare alleles，常見於擴張或近期 sweep。',q1_n:'正確答案已標示。',q2_y:'LD 區段內 SNP 高度相關會讓 PC 過度反映 1–2 個 LD block 而非真實族群結構。',q2_n:'正確答案已標示。',q3_y:'比較不同 K 的 cross-validation error，選最低者為最佳 K。',q3_n:'正確答案已標示。'},en:{q1_y:'D<0 means excess rare alleles, typical of expansion or recent selective sweeps.',q1_n:'Correct answer highlighted.',q2_y:'Correlated SNPs within LD blocks make PCs over-represent 1–2 blocks instead of true ancestry.',q2_n:'Correct answer highlighted.',q3_y:'Compare CV error across K values and pick the K with the lowest CV.',q3_n:'Correct answer highlighted.'}};
+document.querySelectorAll('.quiz-q').forEach((q,qi)=>{const ans=+q.dataset.answer;q.querySelectorAll('.quiz-opt').forEach(o=>{o.addEventListener('click',()=>{if(q.classList.contains('answered'))return;q.classList.add('answered');const fb=document.getElementById('fb'+(qi+1));const ok=+o.dataset.idx===ans;o.classList.add(ok?'correct':'wrong');if(!ok)q.querySelectorAll('.quiz-opt')[ans].classList.add('correct');const L=I18n.get();fb.className='quiz-feedback show '+(ok?'correct-fb':'wrong-fb');fb.textContent=(ok?'✅ ':'❌ ')+(QF[L]['q'+(qi+1)+'_'+(ok?'y':'n')]||'');});});});
+</script>
+</body></html>
